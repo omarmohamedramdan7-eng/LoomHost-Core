@@ -1,0 +1,87 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // 1. Global safety net catch-all
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    // Reusable Global Primitives
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function isOwner(userId) {
+      return isSignedIn() && request.auth.uid == userId;
+    }
+
+    function isValidId(id) {
+      return id is string && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$');
+    }
+
+    function incoming() {
+      return request.resource.data;
+    }
+
+    function existing() {
+      return resource.data;
+    }
+
+    // Schema Validation Helpers
+    function isValidUserProject(data, userId) {
+      return data.projectId is string 
+        && data.projectId.size() <= 128 
+        && data.userId == userId
+        && data.name is string 
+        && data.name.size() <= 256
+        && data.description is string 
+        && data.description.size() <= 4096
+        && data.html is string 
+        && data.html.size() <= 1048576
+        && data.css is string 
+        && data.css.size() <= 1048576
+        && data.js is string 
+        && data.js.size() <= 1048576
+        && data.updatesCount is int
+        && data.visitorsCount is int
+        && data.isPublished is bool
+        && data.publishedUrl is string
+        && data.publishedUrl.size() <= 1024;
+    }
+
+    // Isolated User Projects nested under users subcollection
+    match /users/{userId}/projects/{projectId} {
+      
+      // Get: must be signed-in owner
+      allow get: if isOwner(userId) && isValidId(projectId);
+
+      // List: restricted strictly to the authenticated user's own subset
+      allow list: if isOwner(userId);
+
+      // Create: owner can write only valid schema matching their uid
+      allow create: if isOwner(userId) 
+        && isValidId(projectId) 
+        && isValidUserProject(incoming(), userId)
+        && incoming().createdAt == request.time
+        && incoming().updatedAt == request.time;
+
+      // Update: allow owner to modify content, keeping immutables intact
+      allow update: if isOwner(userId) 
+        && isValidId(projectId) 
+        && isValidUserProject(incoming(), userId)
+        && incoming().createdAt == existing().createdAt
+        && incoming().updatedAt == request.time
+        && (
+          incoming().diff(existing()).affectedKeys().hasOnly([
+            'name', 'description', 'html', 'css', 'js', 
+            'updatesCount', 'visitorsCount', 'isPublished', 
+            'publishedUrl', 'updatedAt'
+          ])
+        );
+
+      // Delete: must be matching owner
+      allow delete: if isOwner(userId) && isValidId(projectId);
+    }
+  }
+}

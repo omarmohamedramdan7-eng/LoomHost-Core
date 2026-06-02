@@ -1,0 +1,72 @@
+{
+  "entities": {
+    "UserProject": {
+      "title": "UserProject",
+      "description": "A representation of an AI-generated website design created by a logged-in user, stored securely in an isolated subcollection.",
+      "type": "object",
+      "properties": {
+        "projectId": {
+          "type": "string",
+          "description": "Unique alphanumeric ID of the project."
+        },
+        "userId": {
+          "type": "string",
+          "description": "The UID of the user owning this project."
+        },
+        "name": {
+          "type": "string",
+          "description": "The custom title of the generated design."
+        },
+        "description": {
+          "type": "string",
+          "description": "Synopsis of the layout and purpose."
+        },
+        "html": {
+          "type": "string",
+          "description": "The generated HTML body payload."
+        },
+        "css": {
+          "type": "string",
+          "description": "The custom CSS rules and styles."
+        },
+        "js": {
+          "type": "string",
+          "description": "The frontend interaction scripts."
+        },
+        "updatesCount": {
+          "type": "integer",
+          "description": "Total number of code edits or updates."
+        },
+        "visitorsCount": {
+          "type": "integer",
+          "description": "Total simulated or actual public views count."
+        },
+        "isPublished": {
+          "type": "boolean",
+          "description": "Whether this project is published instantly."
+        },
+        "publishedUrl": {
+          "type": "string",
+          "description": "The unique public URL mapped for direct access."
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "The timestamp of project creation."
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "The timestamp of the last edit."
+        }
+      },
+      "required": ["projectId", "userId", "name", "html", "css", "js", "updatesCount", "visitorsCount", "isPublished", "createdAt", "updatedAt"]
+    }
+  },
+  "firestore": {
+    "users/{userId}/projects/{projectId}": {
+      "schema": "UserProject",
+      "description": "User specific subcollection containing their AI-generated premium web projects."
+    }
+  }
+}

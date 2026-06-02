@@ -1,0 +1,6 @@
+{
+  "name": "عُمَر | OMAR AI",
+  "description": "منصة عُمَر بالذكاء الاصطناعي للأتمتة السريعة وبناء ونشر مواقع الويب وتخصيص النطاقات المباشرة في ثوانٍ مع تكنولوجيا الدومينات المخصصة والأنماط المعمارية المدفوعة.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
