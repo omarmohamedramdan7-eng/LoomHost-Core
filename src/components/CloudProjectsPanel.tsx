@@ -4,7 +4,6 @@
  */
 
 import React, { useState } from "react";
-import { User } from "firebase/auth";
 import { UserProjectData } from "../lib/projectDb";
 import { 
   Cloud, 
@@ -24,7 +23,7 @@ import {
 } from "lucide-react";
 
 interface CloudProjectsPanelProps {
-  user: User | null;
+  user: any;
   projects: UserProjectData[];
   loading: boolean;
   onLoadProject: (project: UserProjectData) => void;
@@ -33,6 +32,7 @@ interface CloudProjectsPanelProps {
   onRefresh: () => void;
   triggerToast: (msg: string, type: "success" | "error" | "info") => void;
   publishingProjectId: string | null;
+  onTogglePublic: (projectId: string, isPublic: boolean) => Promise<void>;
 }
 
 export const CloudProjectsPanel: React.FC<CloudProjectsPanelProps> = ({
@@ -44,7 +44,8 @@ export const CloudProjectsPanel: React.FC<CloudProjectsPanelProps> = ({
   onPublishProject,
   onRefresh,
   triggerToast,
-  publishingProjectId
+  publishingProjectId,
+  onTogglePublic
 }) => {
   const [searchTerm, setSearchTerm] = useState("");
   const [deleteId, setDeleteId] = useState<string | null>(null);
@@ -230,6 +231,35 @@ export const CloudProjectsPanel: React.FC<CloudProjectsPanelProps> = ({
                             <span className="inline-block text-[9px] font-mono text-amber-500 bg-amber-500/5 px-2 py-0.5 rounded border border-amber-500/10 mt-1">
                               {proj.projectId}.omar.com
                             </span>
+                            <div className="flex items-center gap-1.5 mt-1.5">
+                              {proj.isPublic ? (
+                                <button
+                                  type="button"
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    onTogglePublic(proj.projectId, false);
+                                  }}
+                                  className="text-[9px] font-bold bg-[#efd383]/10 hover:bg-[#efd383]/20 text-[#efd383] border border-[#efd383]/20 px-2 py-0.5 rounded cursor-pointer transition-all flex items-center gap-1"
+                                  title="اضغط لتحويل المشروع إلى خاص"
+                                >
+                                  <span className="w-1.5 h-1.5 bg-[#efd383] rounded-full" />
+                                  <span>👁️ مستعرض للعامة</span>
+                                </button>
+                              ) : (
+                                <button
+                                  type="button"
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    onTogglePublic(proj.projectId, true);
+                                  }}
+                                  className="text-[9px] font-bold bg-slate-900 hover:bg-[#efd383]/10 text-slate-400 hover:text-[#efd383] border border-white/5 hover:border-[#efd383]/20 px-2 py-0.5 rounded cursor-pointer transition-all flex items-center gap-1"
+                                  title="اضغط لتحويل المشروع إلى عام ونشره في مجتمع عُفر"
+                                >
+                                  <span className="w-1.5 h-1.5 bg-slate-500 rounded-full" />
+                                  <span>🔒 ملف خاص</span>
+                                </button>
+                              )}
+                            </div>
                           </div>
                           
                           {/* Delete project */}

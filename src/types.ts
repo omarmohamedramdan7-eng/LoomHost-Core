@@ -38,3 +38,26 @@ export interface GenerationResponse {
   name: string;
   description: string;
 }
+
+export interface LocalUserProfile {
+  uid: string;
+  id: string; // User requested ID
+  displayName: string;
+  name: string; // User requested Name
+  email: string;
+  photoURL?: string;
+  isPremium: boolean;
+  subscriptionPlan: string;
+  createdAt: string;
+}
+
+export interface ProjectComment {
+  commentId: string;
+  projectId: string;
+  userId: string;
+  userName: string;
+  userPhoto?: string;
+  text: string;
+  createdAt: any;
+}
+

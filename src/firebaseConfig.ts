@@ -5,8 +5,8 @@
  */
 
 import { initializeApp } from "firebase/app";
-import { getAuth, GoogleAuthProvider } from "firebase/auth";
 import { getFirestore } from "firebase/firestore";
+import { getAuth } from "firebase/auth";
 import appletConfig from "../firebase-applet-config.json";
 
 // We combine both the automatically provisioned applet config and Vite environment overrides
@@ -22,11 +22,8 @@ const firebaseConfig = {
 // Initialize Firebase App
 const app = initializeApp(firebaseConfig);
 
-// Initialize Firebase Authentication & export
+// Initialize Firebase Auth
 export const auth = getAuth(app);
-
-// Initialize Google Auth Provider & export
-export const googleProvider = new GoogleAuthProvider();
 
 // Initialize Firestore & export
 // CRITICAL: The app will fail to communicate if we do not specify the correct database ID (e.g. enterprise instance id)

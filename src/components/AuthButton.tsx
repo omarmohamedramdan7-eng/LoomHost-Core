@@ -1,173 +1,228 @@
 /**
  * @file AuthButton.tsx
- * @description Highly polished, luxury dark-mode Google Auth Button for Omar AI / LoomHost AI using Firebase.
+ * @description Local User Profile Manager & Subscription Configurator (Fully bypassing Firebase Auth for stable local environments).
  */
 
-import React, { useState, useEffect } from "react";
-import { signInWithPopup, signOut, onAuthStateChanged, User } from "firebase/auth";
-import { auth, googleProvider } from "../firebaseConfig";
-import { LogIn, LogOut, User as UserIcon, Sparkles } from "lucide-react";
+import React, { useState } from "react";
+import { 
+  User as UserIcon, 
+  Sparkles, 
+  Settings2, 
+  Check, 
+  Mail, 
+  Crown,
+  Shuffle,
+  CreditCard
+} from "lucide-react";
+import { LocalUserProfile } from "../types";
 
 interface AuthButtonProps {
-  onAuthSuccess: (user: User) => void;
-  onLogout: () => void;
+  currentUser: LocalUserProfile;
+  setCurrentUser: React.Dispatch<React.SetStateAction<any>>;
   triggerToast: (msg: string, type: "success" | "error" | "info") => void;
+  initiatePayment: () => void;
 }
 
 export const AuthButton: React.FC<AuthButtonProps> = ({
-  onAuthSuccess,
-  onLogout,
-  triggerToast
+  currentUser,
+  setCurrentUser,
+  triggerToast,
+  initiatePayment
 }) => {
-  const [user, setUser] = useState<User | null>(null);
-  const [loading, setLoading] = useState<boolean>(true);
+  const [isOpen, setIsOpen] = useState<boolean>(false);
+  const [editName, setEditName] = useState<string>(currentUser.displayName || currentUser.name || "Guest");
+  const [editEmail, setEditEmail] = useState<string>(currentUser.email || "guest@loomhost.local");
 
-  const authSuccessRef = React.useRef(onAuthSuccess);
-  const logoutRef = React.useRef(onLogout);
-  const isInitial = React.useRef(true);
+  // Apply and persist profile modifications locally
+  const handleSaveProfile = (updatedFields: Partial<LocalUserProfile>) => {
+    const updated = {
+      ...currentUser,
+      ...updatedFields,
+      // Keep name & displayName and id & uid synced for ultimate compatibility
+      name: updatedFields.displayName || updatedFields.name || currentUser.name || "Guest",
+      displayName: updatedFields.displayName || updatedFields.name || currentUser.displayName || "Guest",
+      uid: updatedFields.id || updatedFields.uid || currentUser.uid,
+      id: updatedFields.id || updatedFields.uid || currentUser.id,
+    };
+    setCurrentUser(updated);
+    localStorage.setItem("loom_host_local_user", JSON.stringify(updated));
+    localStorage.setItem("loomhost_user", JSON.stringify(updated));
+  };
 
-  useEffect(() => {
-    authSuccessRef.current = onAuthSuccess;
-    logoutRef.current = onLogout;
-  });
-
-  useEffect(() => {
-    // Listen to Firebase auth state shifts
-    const unsubscribe = onAuthStateChanged(auth, (currentUser) => {
-      setUser(currentUser);
-      setLoading(false);
-      if (currentUser) {
-        authSuccessRef.current(currentUser);
-      } else if (!isInitial.current) {
-        logoutRef.current();
-      }
-      isInitial.current = false;
-    });
-
-    return () => unsubscribe();
-  }, []);
-
-  const handleSignIn = async () => {
-    // Check if the user has changed the placeholder config keys yet
-    const apiKey = auth?.app?.options?.apiKey;
-    const isConfigured = apiKey && apiKey !== "YOUR_API_KEY_HERE" && !apiKey.includes("Placeholder") && apiKey.length > 5;
-    
-    if (!isConfigured) {
-      triggerToast(
-        "⚠️ يرجى أولاً إدخال مفاتيح Firebase الخاصة بك في ملف src/firebaseConfig.ts ليتم الاتصال بخادم جوجل بنجاح.",
-        "info"
-      );
-      return;
-    }
-
-    try {
-      setLoading(true);
-      await signInWithPopup(auth, googleProvider);
-      triggerToast("👋 توثيق آمن: جاري مزامنة حسابك سحابياً...", "success");
-    } catch (err: any) {
-      console.error("Firebase auth error:", err);
-      // Friendly toast message explaining how to enable the sign-in provider or check rules
-      triggerToast(
-        `❌ فشل تسجيل الدخول: يرجى التحقق من مفاتيح Firebase وتفعيل Google Sign-In بمشروعك (تفصيل: ${err.message})`,
-        "error"
-      );
-      setLoading(false);
+  const handleTogglePremium = () => {
+    if (!currentUser.isPremium) {
+      // Trigger pay simulator
+      initiatePayment();
+      
+      // Upgrade sandbox
+      const updatedPlan = "Premium Pro Plan";
+      handleSaveProfile({
+        isPremium: true,
+        subscriptionPlan: updatedPlan
+      });
+      triggerToast("🚀 تم تنشيط النطاق السحابي للمحاكاة (Premium).", "success");
+    } else {
+      // Downgrade sandbox
+      handleSaveProfile({
+        isPremium: false,
+        subscriptionPlan: "Free Plan"
+      });
+      triggerToast("⬇️ تم الرجوع للخطة المجانية.", "info");
     }
   };
 
-  const handleSignOut = async () => {
-    try {
-      await signOut(auth);
-      triggerToast("🔒 تم تسجيل الخروج وحماية جلستك بنجاح.", "success");
-    } catch (err: any) {
-      triggerToast("عذراً، حدث خطأ أثناء محاولة تسجيل الخروج.", "error");
-    }
+  const handleRegenerateUid = () => {
+    const randomUid = "usr_" + Math.random().toString(36).substring(2, 10);
+    handleSaveProfile({ id: randomUid, uid: randomUid });
+    triggerToast(`🔑 تم توليد معرف مستخدم فريد ومحمي: ${randomUid}`, "info");
   };
-
-  if (loading) {
-    return (
-      <button
-        id="auth-loading-state"
-        disabled
-        className="flex items-center gap-2 px-4 py-2 text-xs font-bold text-slate-400 bg-slate-900 border border-slate-800 rounded-xl"
-        dir="rtl"
-      >
-        <span className="h-2 w-2 rounded-full bg-amber-400 animate-ping"></span>
-        <span>جاري التحقق من الهوية...</span>
-      </button>
-    );
-  }
 
   return (
-    <div id="auth-button-module" className="flex items-center gap-3 font-sans" dir="rtl">
-      {user ? (
-        <div id="auth-signed-in" className="flex items-center gap-3 bg-slate-950/80 border border-slate-800/80 rounded-2xl p-1.5 pl-4 hover:border-slate-700/80 transition-all">
-          {/* User Profile Avatar */}
-          {user.photoURL ? (
-            <img
-              src={user.photoURL}
-              alt={user.displayName || "User"}
-              className="h-8 w-8 rounded-xl object-cover border border-slate-700"
-              referrerPolicy="no-referrer"
-            />
+    <div id="local-profile-manager" className="relative font-sans" dir="rtl">
+      {/* Trigger Button */}
+      <button
+        onClick={() => {
+          setIsOpen(!isOpen);
+          setEditName(currentUser.displayName || currentUser.name || "Guest");
+          setEditEmail(currentUser.email || "guest@loomhost.local");
+        }}
+        className="flex items-center gap-2.5 bg-slate-950/80 border border-slate-800 hover:border-amber-500/30 rounded-xl p-1.5 pl-3 transition-all duration-300 cursor-pointer text-right select-none"
+        title="إدارة الحساب المحلي السحابي"
+      >
+        <div className="h-8 w-8 rounded-lg bg-gradient-to-tr from-amber-500 to-yellow-300 flex items-center justify-center text-slate-950">
+          {currentUser.isPremium ? (
+            <Crown className="w-4 h-4 text-slate-950 fill-slate-950" />
           ) : (
-            <div className="h-8 w-8 rounded-xl bg-gradient-to-tr from-[#00f0ff] to-[#39ff14] flex items-center justify-center text-slate-950">
-              <UserIcon className="h-4 w-4" />
-            </div>
+            <UserIcon className="h-4 w-4 text-slate-950" />
           )}
-
-          {/* User description & log out action */}
-          <div className="flex flex-col text-right">
-            <span className="text-[11px] font-black text-slate-100 max-w-[124px] truncate leading-tight">
-              {user.displayName || "عضو عمر AI"}
-            </span>
-            <span className="text-[9px] text-[#00f0ff] font-mono leading-none mt-0.5">
-              مستضيف معتمد
-            </span>
-          </div>
-
-          <div className="h-4 w-px bg-slate-800/80"></div>
-
-          {/* Sign Out Trigger */}
-          <button
-            id="btn-trigger-logout"
-            onClick={handleSignOut}
-            className="p-1 text-slate-400 hover:text-rose-400 hover:bg-rose-500/10 rounded-lg transition-all"
-            title="تسجيل الخروج"
-          >
-            <LogOut className="h-4 w-4" />
-          </button>
         </div>
-      ) : (
-        <button
-          id="btn-google-login"
-          onClick={handleSignIn}
-          className="group relative flex items-center gap-2.5 px-4.5 py-2.5 rounded-xl bg-[#070b14] border border-slate-800 hover:border-[#00f0ff]/30 text-xs font-semibold text-slate-200 transition-all duration-300 hover:shadow-[0_0_15px_rgba(0,240,255,0.1)] active:scale-95"
-        >
-          {/* Google Color G Symbol Vector Built Inline */}
-          <svg className="h-4 w-4 shrink-0 transition-transform group-hover:scale-110" viewBox="0 0 24 24" fill="none">
-            <path
-              d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z"
-              fill="#4285F4"
-            />
-            <path
-              d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z"
-              fill="#34A853"
-            />
-            <path
-              d="M5.84 14.1c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.08H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.92l2.85-2.22-.03-.6z"
-              fill="#FBBC05"
-            />
-            <path
-              d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.08l3.66 2.84c.87-2.6 3.3-4.54 6.16-4.54z"
-              fill="#EA4335"
-            />
-          </svg>
 
-          <span className="group-hover:text-white transition-colors">الدخول بجوجل</span>
-          
-          <Sparkles className="h-3.5 w-3.5 text-[#00f0ff]/50 group-hover:text-[#00f0ff] animate-pulse" />
-        </button>
+        <div className="flex flex-col">
+          <span className="text-[11px] font-black text-slate-100 max-w-[124px] truncate leading-tight">
+            {currentUser.displayName || currentUser.name || "Guest"}
+          </span>
+          <span className="text-[9px] text-[#efd383] font-mono leading-none mt-0.5 flex items-center gap-1 font-bold">
+            {currentUser.isPremium ? (
+              <>
+                <Crown className="w-2.5 h-2.5 text-amber-400 fill-amber-400" />
+                <span>{currentUser.subscriptionPlan}</span>
+              </>
+            ) : (
+              <span>عضو عادي (شريكة مجانية)</span>
+            )}
+          </span>
+        </div>
+
+        <Settings2 className="w-3.5 h-3.5 text-slate-400 group-hover:text-white mr-1 transition-colors" />
+      </button>
+
+      {/* Profile Collapsible Panel */}
+      {isOpen && (
+        <>
+          <div 
+            className="fixed inset-0 z-40" 
+            onClick={() => setIsOpen(false)} 
+          />
+          <div className="absolute left-0 mt-3.5 w-72 bg-[#090b10] border border-white/5 shadow-2xl rounded-2xl p-4.5 z-50 animate-scale-up space-y-4">
+            <div className="border-b border-white/5 pb-2">
+              <h4 className="text-xs font-black text-[#efd383] flex items-center gap-1.5">
+                <Settings2 className="w-4 h-4 text-amber-400" />
+                إعدادات الحساب السحابي الفوري
+              </h4>
+              <p className="text-[9px] text-slate-400 mt-1 font-sans">
+                هيكل الملف الشخصي المحلي (بيديل آمن وخفيف لـ Google SSO)
+              </p>
+            </div>
+
+            {/* Inputs */}
+            <div className="space-y-3">
+              <div className="space-y-1">
+                <label className="text-[10px] text-slate-400 block font-bold">إسم العميل المنشور:</label>
+                <input
+                  type="text"
+                  value={editName}
+                  onChange={(e) => {
+                    setEditName(e.target.value);
+                    handleSaveProfile({ displayName: e.target.value, name: e.target.value });
+                  }}
+                  className="w-full px-2.5 py-1.5 bg-black/60 border border-white/5 focus:border-[#efd383]/40 rounded-lg text-xs text-white focus:outline-none"
+                />
+              </div>
+
+              <div className="space-y-1">
+                <label className="text-[10px] text-slate-400 block font-bold">البريد الإلكتروني الموصول:</label>
+                <div className="relative">
+                  <input
+                    type="email"
+                    value={editEmail}
+                    onChange={(e) => {
+                      setEditEmail(e.target.value);
+                      handleSaveProfile({ email: e.target.value });
+                    }}
+                    className="w-full px-2.5 py-1.5 bg-black/60 border border-white/5 focus:border-[#efd383]/40 rounded-lg text-xs text-white focus:outline-none text-left"
+                  />
+                  <Mail className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-slate-500 pointer-events-none" />
+                </div>
+              </div>
+
+              <div className="space-y-1 bg-black/40 border border-white/5 p-2 rounded-lg text-right">
+                <div className="flex justify-between items-center text-[9px] text-slate-400">
+                  <span className="font-bold">مُعرّف العميل (Workspace-UID):</span>
+                  <button
+                    onClick={handleRegenerateUid}
+                    className="p-1 text-slate-400 hover:text-amber-400 rounded hover:bg-white/5"
+                    title="توليد معرف مستخدم عشوائي جديد"
+                  >
+                    <Shuffle className="w-3 h-3" />
+                  </button>
+                </div>
+                <span className="text-[10px] text-slate-200 block truncate font-mono select-all bg-black/80 px-1.5 py-0.5 rounded border border-white/5 mt-1 text-center">
+                  {currentUser.uid || currentUser.id}
+                </span>
+              </div>
+            </div>
+
+            {/* Premium Gating Configurator (Perfect for payments simulator / expansion) */}
+            <div className="bg-amber-950/10 border border-[#efd383]/10 p-3 rounded-xl space-y-2">
+              <div className="flex items-center justify-between">
+                <span className="text-[10px] font-black text-amber-300 flex items-center gap-1">
+                  <Crown className="w-3.5 h-3.5 text-amber-400 fill-amber-400" />
+                  ترقية الحساب المدفوع
+                </span>
+                <span className="text-[9px] text-amber-500 bg-amber-500/10 rounded font-bold px-1 py-0.5">
+                  Sandbox Pay
+                </span>
+              </div>
+              <p className="text-[9px] text-slate-400 leading-relaxed font-sans">
+                تفعيل الـ Premium يتيح الميزات السحابية اللامحدودة، التخصيص، والسرعة الخارقة تلقائياً.
+              </p>
+
+              <button
+                type="button"
+                onClick={handleTogglePremium}
+                className={`w-full py-1.5 text-[10px] font-extrabold rounded-lg transition duration-150 flex items-center justify-center gap-1.5 cursor-pointer ${
+                  currentUser.isPremium 
+                    ? "bg-rose-500/20 text-rose-300 hover:bg-rose-500/30 border border-rose-500/30" 
+                    : "bg-amber-400 hover:bg-amber-500 text-black shadow-lg shadow-amber-500/10"
+                }`}
+              >
+                {currentUser.isPremium ? (
+                  <span>تعطيل الـ Premium مؤقتاً</span>
+                ) : (
+                  <>
+                    <Sparkles className="w-3 h-3 fill-slate-950" />
+                    <span>تفعيل النطاق المدفوع مجاناً 🚀</span>
+                  </>
+                )}
+              </button>
+            </div>
+            
+            <div className="flex justify-between items-center text-[9px] text-slate-500 border-t border-white/5 pt-2">
+              <span>أمان عُمر AI • الحفظ سحابي معزول</span>
+              <Check className="w-3 h-3 text-emerald-400" />
+            </div>
+          </div>
+        </>
       )}
     </div>
   );

@@ -40,6 +40,24 @@ export const SeoOptimizerPanel: React.FC<SeoOptimizerPanelProps> = ({
   const [copiedMeta, setCopiedMeta] = useState<boolean>(false);
 
   const handleRunSeoAudit = async () => {
+    // Lazy Authentication Check
+    const localUserStr = localStorage.getItem("loom_host_local_user") || "{}";
+    let isGuest = true;
+    try {
+      const parsed = JSON.parse(localUserStr);
+      isGuest = !parsed.id || parsed.id.startsWith("usr_");
+    } catch (e) {}
+
+    const hasRealUser = !!localStorage.getItem("clerk_mock_signed_in") || !isGuest;
+    if (!hasRealUser) {
+      if ((window as any).openSignIn) {
+        (window as any).openSignIn();
+      } else {
+        alert("يرجى تسجيل الدخول أولاً لتشغيل فحص السيو.");
+      }
+      return;
+    }
+
     setIsLoading(true);
     try {
       const response = await fetch("/api/automation/seo-optimize", {

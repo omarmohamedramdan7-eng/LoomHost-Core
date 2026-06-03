@@ -49,6 +49,30 @@
           "type": "string",
           "description": "The unique public URL mapped for direct access."
         },
+        "isPublic": {
+          "type": "boolean",
+          "description": "Whether the project is visible in the public community gallery."
+        },
+        "likesCount": {
+          "type": "integer",
+          "description": "Total number of likes."
+        },
+        "likes": {
+          "type": "array",
+          "description": "Array of user UIDs who liked the project."
+        },
+        "clonesCount": {
+          "type": "integer",
+          "description": "Number of times this project was duplicated or cloned."
+        },
+        "originalPrompt": {
+          "type": "string",
+          "description": "The prompt original prompt word used to generate this site."
+        },
+        "creatorName": {
+          "type": "string",
+          "description": "Display name of the site creator."
+        },
         "createdAt": {
           "type": "string",
           "format": "date-time",
@@ -61,12 +85,57 @@
         }
       },
       "required": ["projectId", "userId", "name", "html", "css", "js", "updatesCount", "visitorsCount", "isPublished", "createdAt", "updatedAt"]
+    },
+    "ProjectComment": {
+      "title": "ProjectComment",
+      "description": "A representation of a developer or visitor comment left on a public community project.",
+      "type": "object",
+      "properties": {
+        "commentId": {
+          "type": "string",
+          "description": "The unique ID for the comment doc."
+        },
+        "projectId": {
+          "type": "string",
+          "description": "Reference project ID where the comment was posted."
+        },
+        "userId": {
+          "type": "string",
+          "description": "Author UID."
+        },
+        "userName": {
+          "type": "string",
+          "description": "Author full name."
+        },
+        "userPhoto": {
+          "type": "string",
+          "description": "Author photo/avatar URL."
+        },
+        "text": {
+          "type": "string",
+          "description": "Text of the actual query/feedback review comment."
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Server creation timestamp of comment."
+        }
+      },
+      "required": ["commentId", "projectId", "userId", "userName", "text", "createdAt"]
     }
   },
   "firestore": {
     "users/{userId}/projects/{projectId}": {
       "schema": "UserProject",
       "description": "User specific subcollection containing their AI-generated premium web projects."
+    },
+    "public_projects/{projectId}": {
+      "schema": "UserProject",
+      "description": "Global user projects that are marked toggle public for community and clones."
+    },
+    "public_projects/{projectId}/comments/{commentId}": {
+      "schema": "ProjectComment",
+      "description": "User feedback, suggestions, and collaborative comments under each public project."
     }
   }
 }

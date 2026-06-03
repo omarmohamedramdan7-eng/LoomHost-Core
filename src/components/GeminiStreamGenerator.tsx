@@ -53,6 +53,24 @@ export const GeminiStreamGenerator: React.FC<GeminiStreamGeneratorProps> = React
   const handleGenerate = useCallback(async () => {
     if (!aiPrompt.trim()) return;
 
+    // Lazy Authentication Check
+    const localUserStr = localStorage.getItem("loom_host_local_user") || "{}";
+    let isGuest = true;
+    try {
+      const parsed = JSON.parse(localUserStr);
+      isGuest = !parsed.id || parsed.id.startsWith("usr_");
+    } catch (e) {}
+
+    const hasRealUser = !!localStorage.getItem("clerk_mock_signed_in") || !isGuest;
+    if (!hasRealUser) {
+      if ((window as any).openSignIn) {
+        (window as any).openSignIn();
+      } else {
+        alert("يرجى تسجيل الدخول أولاً لتوليد المواقع عبر الذكاء الاصطناعي.");
+      }
+      return;
+    }
+
     setErrorMsg(null);
     setLocalIsGenerating(true);
     setStreamedText("");

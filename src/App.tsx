@@ -32,11 +32,17 @@ import {
   Settings,
   Download,
   Shield,
+  ShieldAlert,
+  Search,
+  Award,
   BookOpen,
   FileText,
   Mail,
-  MessageSquare
+  MessageSquare,
+  User
 } from "lucide-react";
+import { ProjectCommentsSection } from "./components/ProjectCommentsSection";
+
 import { HostedSite } from "./types";
 import { PRESET_TEMPLATES, Template } from "./components/SiteTemplates";
 import JSZip from "jszip";
@@ -48,24 +54,29 @@ import { SeoOptimizerPanel } from "./components/SeoOptimizerPanel";
 import { UptimeMonitorPanel } from "./components/UptimeMonitorPanel";
 import { AuthButton } from "./components/AuthButton";
 import { CloudProjectsPanel } from "./components/CloudProjectsPanel";
+import { SignedIn, SignedOut, SignInButton, UserButton, useUser, isClerkConfigured } from "./clerk-bridge";
 import { GeminiStreamGenerator } from "./components/GeminiStreamGenerator";
 import { GlobalGatewayHub } from "./components/GlobalGatewayHub";
 
-import { User, signInWithPopup } from "firebase/auth";
-import { auth, googleProvider } from "./firebaseConfig";
+import { LocalUserProfile } from "./types";
 import { 
   saveProjectToFirestore, 
   fetchProjectsFromFirestore, 
   deleteProjectFromFirestore, 
+  toggleProjectPrivacy,
+  fetchPublicProjects,
+  likeProject,
+  incrementCloneCount,
   UserProjectData 
 } from "./lib/projectDb";
 
 // @ts-ignore
 import mockupImage from "./assets/images/loomhost_mockup_1780152908073.png";
 
-type ActiveTab = "studio" | "generator" | "editor" | "deployments";
+type ActiveTab = "studio" | "generator" | "editor" | "deployments" | "community" | "profile";
 
 export default function App() {
+
   // Navigation
   const [activeTab, setActiveTab] = useState<ActiveTab>("studio");
 
@@ -81,16 +92,110 @@ export default function App() {
 
   const [isAutomationDeckOpen, setIsAutomationDeckOpen] = useState<boolean>(true);
 
-  // User session & Cloud projects synchronization states
-  const [currentUser, setCurrentUser] = useState<User | null>(null);
+  // Local User Profile Generator for immediate, lag-free Vercel and serverless deployments
+  const getOrCreateUser = (): LocalUserProfile => {
+    const saved = localStorage.getItem("loom_host_local_user") || localStorage.getItem("loomhost_user");
+    if (saved) {
+      try {
+        const parsed = JSON.parse(saved);
+        if (parsed.id || parsed.uid) {
+          return {
+            uid: parsed.uid || parsed.id,
+            id: parsed.id || parsed.uid,
+            name: parsed.name || parsed.displayName || "Guest",
+            displayName: parsed.displayName || parsed.name || "Guest",
+            email: parsed.email || "guest@loomhost.ai",
+            photoURL: parsed.photoURL || "https://lh3.googleusercontent.com/a/default-user=s96-c",
+            isPremium: parsed.isPremium !== undefined ? !!parsed.isPremium : false,
+            subscriptionPlan: parsed.subscriptionPlan || (parsed.isPremium ? "Premium Pro Plan" : "Free Plan"),
+            createdAt: parsed.createdAt || new Date().toISOString()
+          };
+        }
+      } catch (e) {
+        console.error("Failed parsing local user schema:", e);
+      }
+    }
+
+    // Generate robust default Profile: Guest, isPremium: false
+    const randomId = "usr_" + Math.random().toString(36).substring(2, 10);
+    const guestUser: LocalUserProfile = {
+      uid: randomId,
+      id: randomId,
+      name: "Guest",
+      displayName: "Guest",
+      email: "guest@loomhost.ai",
+      photoURL: "https://lh3.googleusercontent.com/a/default-user=s96-c",
+      isPremium: false,
+      subscriptionPlan: "Free Plan",
+      createdAt: new Date().toISOString()
+    };
+    localStorage.setItem("loom_host_local_user", JSON.stringify(guestUser));
+    localStorage.setItem("loomhost_user", JSON.stringify(guestUser));
+    return guestUser;
+  };
+
+  // Synchronously initialize state with zero startup delay
+  const [currentUser, setCurrentUser] = useState<LocalUserProfile>(getOrCreateUser);
+
+  // Clerk state bridge for automatic profile synchronization
+  const { isLoaded, isSignedIn, user } = useUser();
+
+  useEffect(() => {
+    if (isLoaded && isSignedIn && user) {
+      const clerkUser: LocalUserProfile = {
+        uid: user.id,
+        id: user.id,
+        name: user.fullName || user.username || "Guest",
+        displayName: user.fullName || user.username || "Guest",
+        email: user.primaryEmailAddress?.emailAddress || "guest@loomhost.ai",
+        photoURL: user.imageUrl || "https://lh3.googleusercontent.com/a/default-user=s96-c",
+        isPremium: !!(user.publicMetadata?.isPremium) || false,
+        subscriptionPlan: (user.publicMetadata?.subscriptionPlan as string) || "Free Plan",
+        createdAt: user.createdAt ? new Date(user.createdAt).toISOString() : new Date().toISOString()
+      };
+      setCurrentUser(clerkUser);
+      localStorage.setItem("loom_host_local_user", JSON.stringify(clerkUser));
+      localStorage.setItem("loomhost_user", JSON.stringify(clerkUser));
+    } else if (isLoaded && !isSignedIn) {
+      const local = getOrCreateUser();
+      setCurrentUser(local);
+    }
+  }, [isLoaded, isSignedIn, user]);
+
   const [userProjects, setUserProjects] = useState<UserProjectData[]>([]);
   const [loadingProjects, setLoadingProjects] = useState<boolean>(false);
   const [isSavingProjectCloud, setIsSavingProjectCloud] = useState<boolean>(false);
   const [publishingProjectId, setPublishingProjectId] = useState<string | null>(null);
   const [activeProjectId, setActiveProjectId] = useState<string | null>(null);
+  const [activeProjectOwnerId, setActiveProjectOwnerId] = useState<string | null>(null);
 
-  // Auth & Flows gating states
-  const [showAuthModal, setShowAuthModal] = useState<boolean>(false);
+  // Community and Leaderboard states
+  const [publicProjects, setPublicProjects] = useState<UserProjectData[]>([]);
+  const [loadingPublicProjects, setLoadingPublicProjects] = useState<boolean>(false);
+  const [communitySearchTerm, setCommunitySearchTerm] = useState<string>("");
+  const [selectedCategoryFilter, setSelectedCategoryFilter] = useState<string>("all");
+
+  const filteredPublicProjects = publicProjects.filter(proj => {
+    const text = ((proj.name || "") + " " + (proj.description || "") + " " + (proj.creatorName || "") + " " + (proj.projectId || "")).toLowerCase();
+    const matchesSearch = text.includes(communitySearchTerm.toLowerCase());
+    
+    if (selectedCategoryFilter === "all") return matchesSearch;
+    if (selectedCategoryFilter === "store") return matchesSearch && (proj.projectId.includes("store") || proj.name.includes("متجر") || proj.description?.includes("متجر"));
+    if (selectedCategoryFilter === "dental") return matchesSearch && (proj.projectId.includes("dental") || proj.name.includes("عيادة") || proj.projectId.includes("clinic") || proj.description?.includes("عياد"));
+    if (selectedCategoryFilter === "saas") return matchesSearch && (proj.name.includes("SaaS") || proj.projectId.includes("saas") || proj.description?.includes("برمج"));
+    if (selectedCategoryFilter === "portfolio") return matchesSearch && (proj.name.includes("شخص") || proj.projectId.includes("portfolio") || proj.description?.includes("معرض"));
+    return matchesSearch;
+  });
+
+  const leaderboardProjects = [...publicProjects]
+    .sort((a, b) => ((b.clonesCount || 0) + (b.likesCount || 0)) - ((a.clonesCount || 0) + (a.likesCount || 0)))
+    .slice(0, 5);
+
+  // "Use Prompt" Clone system modal attributes
+  const [cloningPromptModalOpen, setCloningPromptModalOpen] = useState<boolean>(false);
+  const [cloningPromptText, setCloningPromptText] = useState<string>("");
+  const [cloningProjectId, setCloningProjectId] = useState<string>("");
+  const [cloningOwnerId, setCloningOwnerId] = useState<string>("");
 
   // Smart Clone Box interactive states
   const [cloneMode, setCloneMode] = useState<"image" | "url" | null>(null);
@@ -186,11 +291,82 @@ export default function App() {
       await deleteProjectFromFirestore(currentUser.uid, projectId);
       if (activeProjectId === projectId) {
         setActiveProjectId(null);
+        setActiveProjectOwnerId(null);
       }
       await loadUserProjects(currentUser.uid);
     } catch (err) {
       triggerToast("❌ فشل حذف المشروع من السحابة.", "error");
     }
+  };
+
+  const handleToggleProjectPrivacyCloud = async (projectId: string, isPublic: boolean) => {
+    if (!currentUser) {
+      triggerToast("🔐 يرجى تسجيل الدخول لإعداد خصوصية التصميم.", "info");
+      return;
+    }
+    try {
+      const proj = userProjects.find(p => p.projectId === projectId);
+      if (!proj) return;
+
+      const projectWithCreator = {
+        ...proj,
+        creatorName: currentUser.name || currentUser.displayName || "مطور عُفر"
+      };
+
+      await toggleProjectPrivacy(currentUser.uid, projectId, isPublic, projectWithCreator);
+      
+      triggerToast(
+        isPublic 
+          ? "🌍 تم إدراج المشروع بنجاح في المعرض العام لمجتمع عُفر البصري!" 
+          : "🔒 تم إخفاء المشروع وتشفيره سحابياً ليصبح خاصاً بك فقط.", 
+        "success"
+      );
+      
+      await loadUserProjects(currentUser.uid);
+      await loadPublicProjects();
+    } catch (err) {
+      console.error(err);
+      triggerToast("❌ فشل تغيير إعدادات خصوصية المشروع.", "error");
+    }
+  };
+
+  const loadPublicProjects = async () => {
+    setLoadingPublicProjects(true);
+    try {
+      const list = await fetchPublicProjects();
+      setPublicProjects(list || []);
+    } catch (err) {
+      console.error("Error loading public projects:", err);
+    } finally {
+      setLoadingPublicProjects(false);
+    }
+  };
+
+  const handleLikeProjectCloud = async (projectId: string, originalOwnerId: string) => {
+    if (!currentUser) {
+      triggerToast("🔐 يرجى تسجيل الدخول أولاً للإعجاب بالمشاريع وتفعيل روح التفاعل والتنافس!", "info");
+      return;
+    }
+    try {
+      await likeProject(currentUser.uid, projectId, originalOwnerId);
+      triggerToast("❤️ تم تسجيل تفاعلك الفاخر مع المشروع بنجاح!", "success");
+      await loadPublicProjects();
+    } catch (err) {
+      console.error(err);
+      triggerToast("❌ فشل التفاعل مع المشروع.", "error");
+    }
+  };
+
+  const handleClonePromptUse = async (projectId: string, originalPrompt: string, originalOwnerId: string) => {
+    try {
+      await incrementCloneCount(projectId, originalOwnerId);
+    } catch (e) {
+      console.warn("Clone increment fail:", e);
+    }
+    setAiPrompt(originalPrompt || "تصميم متجر إلكتروني فاخر باللون الذهبي");
+    setActiveTab("generator");
+    setCloningPromptModalOpen(false);
+    triggerToast("✨ تم نسخ البرومبت الأصلي ونقله لمولد الـ AI بنجاح! يمكنك الآن بناء نسختك الخاصة.", "success");
   };
 
   const handleLoadProjectCloudIntoEditor = (proj: UserProjectData) => {
@@ -200,6 +376,7 @@ export default function App() {
     setSiteName(proj.name);
     setSiteDesc(proj.description || "");
     setActiveProjectId(proj.projectId);
+    setActiveProjectOwnerId(proj.userId || currentUser.uid);
     setActiveTab("editor");
     triggerToast(`📂 تم استيراد مشروع "${proj.name}" بنجاح في محرر الأكواد للمعاينة والتعديل المباشر!`, "success");
   };
@@ -499,39 +676,18 @@ document.getElementById('alert-trigger')?.addEventListener('click', () => {
   // Preview Iframe Ref
   const iframeRef = useRef<HTMLIFrameElement | null>(null);
 
-  // SaaS Authenticated Guard & Direct Sign Up/In handler
-  const handleDirectSignIn = async () => {
-    const apiKey = auth?.app?.options?.apiKey;
-    const isConfigured = apiKey && apiKey !== "YOUR_API_KEY_HERE" && !apiKey.includes("Placeholder") && apiKey.length > 5;
-    
-    if (!isConfigured) {
-      triggerToast(
-        "⚠️ يرجى أولاً إدخال مفاتيح Firebase الخاصة بك في ملف src/firebaseConfig.ts ليتم الاتصال بخادم جوجل بنجاح.",
-        "info"
-      );
-      return;
-    }
-
-    try {
-      triggerToast("👋 توثيق آمن: جاري مزامنة بياناتك سحابياً...", "info");
-      const result = await signInWithPopup(auth, googleProvider);
-      setCurrentUser(result.user);
-      await loadUserProjects(result.user.uid);
-      setShowAuthModal(false);
-      triggerToast(`👋 أهلاً بك يا ${result.user.displayName || "مستضيفنا الكريم"}! تم الدخول والمزامنة بنجاح.`, "success");
-    } catch (err: any) {
-      console.error("Firebase direct authentication error:", err);
-      triggerToast(`❌ فشل تسجيل الدخول: ${err.message}`, "error");
-    }
+  const handleTabChange = (tab: ActiveTab) => {
+    setActiveTab(tab);
   };
 
-  const handleTabChange = (tab: ActiveTab) => {
-    if ((tab === "generator" || tab === "editor") && !currentUser) {
-      triggerToast("⚠️ يرجى تسجيل الدخول أولاً لتفعيل محرك التوليد ونظام الاستضافة السحابي.", "info");
-      setShowAuthModal(true);
-      return;
-    }
-    setActiveTab(tab);
+  // payment simulator framework and checkout hook (Zero-runtime external configuration required)
+  const initiatePayment = () => {
+    triggerToast("💳 جاري تحضير الاتصال الآمن مع بوابة دفع LoomHost AI السريعة...", "info");
+    
+    // Simulate payment loading
+    setTimeout(() => {
+      triggerToast("🔐 قريباً! سيتم ربط هذه البوابة بـ Stripe / PayPal مع إطلاق الإنتاج ومزامنة اشتراك Premium Pro.", "success");
+    }, 1200);
   };
 
   // Smart Clone Box handlers
@@ -557,10 +713,14 @@ document.getElementById('alert-trigger')?.addEventListener('click', () => {
     }, 1500);
   };
 
-  // Load deployed websites at mount
+  // Load deployed websites & user projects when user changes or mounts
   useEffect(() => {
     fetchSites();
-  }, []);
+    loadPublicProjects();
+    if (currentUser?.uid) {
+      loadUserProjects(currentUser.uid);
+    }
+  }, [currentUser?.uid]);
 
   // Update sandbox preview iframe whenever active codes change
   useEffect(() => {
@@ -572,7 +732,11 @@ document.getElementById('alert-trigger')?.addEventListener('click', () => {
   const fetchSites = async () => {
     try {
       setLoadingSites(true);
-      const res = await fetch("/api/sites");
+      const headers: HeadersInit = {};
+      if (currentUser) {
+        headers["Authorization"] = `Bearer ${currentUser.uid}`;
+      }
+      const res = await fetch("/api/sites", { headers });
       if (!res.ok) throw new Error("فشل الاتصال بـ الخادم المضيف.");
       const data = await res.json();
       setHostedSites(data);
@@ -1432,23 +1596,66 @@ ${jsCode}
                   </span>
                 )}
               </button>
+              <button
+                id="tab-community"
+                onClick={() => setActiveTab("community")}
+                className={`px-3 py-1.5 rounded-lg transition-all flex items-center gap-1.5 relative border ${
+                  activeTab === "community"
+                    ? "bg-amber-950/20 border-amber-500/40 text-[#efd383] font-bold shadow-[0_0_12px_rgba(245,158,11,0.15)]"
+                    : "border-transparent text-gray-400 hover:text-white"
+                }`}
+              >
+                <Globe className="w-3.5 h-3.5 text-amber-400" />
+                معرض المشاريع
+                <span className="bg-amber-500/10 text-[#efd383] text-[9px] px-1.5 py-0.5 rounded-md border border-amber-500/20 font-bold">
+                  جديد
+                </span>
+              </button>
+              
+              <button
+                id="tab-profile"
+                onClick={() => handleTabChange("profile" as any)}
+                className={`px-3 py-1.5 rounded-lg transition-all flex items-center gap-1.5 border ${
+                  activeTab === "profile"
+                    ? "bg-amber-950/20 border-amber-500/40 text-amber-300 font-bold shadow-[0_0_12px_rgba(245,158,11,0.15)]"
+                    : "border-transparent text-gray-400 hover:text-white"
+                }`}
+              >
+                <User className="w-3.5 h-3.5 text-amber-400" />
+                الملف الشخصي
+              </button>
             </nav>
+
 
             <div className="border-r border-white/5 h-6 hidden sm:block"></div>
 
-            <AuthButton 
-              onAuthSuccess={(user) => {
-                setCurrentUser(user);
-                loadUserProjects(user.uid);
-                setActiveTab("studio");
-              }}
-              onLogout={() => {
-                setCurrentUser(null);
-                setUserProjects([]);
-                setActiveTab("studio");
-              }}
-              triggerToast={triggerToast}
-            />
+            {/* Clerk Authentication Interface for LoomHost AI and SignedIn / SignedOut flows */}
+            <div className="flex items-center gap-3 font-sans">
+              <SignedOut>
+                <div id="clerk-signin-wrapper" className="bg-gradient-to-r from-amber-400 to-[#efd383] hover:brightness-110 rounded-xl text-black font-extrabold text-xs transition-all cursor-pointer shadow-lg shadow-amber-500/10">
+                  <SignInButton mode="modal">
+                    <button className="px-3.5 py-2 cursor-pointer flex items-center gap-1.5 hover:scale-[1.02] active:scale-[0.98] transition-transform font-black">
+                      <Sparkles className="w-3.5 h-3.5 text-black animate-pulse" />
+                      تسجيل الدخول
+                    </button>
+                  </SignInButton>
+                </div>
+              </SignedOut>
+
+              <SignedIn>
+                <div id="clerk-signedin-wrapper" className="bg-slate-950/80 border border-slate-800 rounded-xl px-2.5 py-1.5 flex items-center gap-2">
+                  <span className="text-[10px] text-slate-400 font-bold hidden md:inline select-none">لوحة التحكم النشطة</span>
+                  <UserButton afterSignOutUrl="/" />
+                </div>
+              </SignedIn>
+
+              <AuthButton 
+                currentUser={currentUser}
+                setCurrentUser={setCurrentUser}
+                triggerToast={triggerToast}
+                initiatePayment={initiatePayment}
+              />
+            </div>
           </div>
         </div>
       </header>
@@ -1456,8 +1663,50 @@ ${jsCode}
       {/* Main Container */}
       <main className="flex-1 max-w-7xl w-full mx-auto p-4 sm:p-6 lg:p-8">
 
-        {/* ==================== SCREEN 1: STUDIO HOME ==================== */}
-        {activeTab === "studio" && (
+        {isLoaded && !isSignedIn && false ? (
+          <div className="max-w-md mx-auto my-12 bg-gradient-to-b from-[#0e1017] to-[#040406] border-2 border-amber-500/20 rounded-3xl p-8 relative overflow-hidden text-center space-y-6 shadow-2xl animate-scale-up" dir="rtl">
+            <div className="absolute top-0 right-0 w-32 h-32 bg-amber-500/5 rounded-full blur-2xl pointer-events-none" />
+            <div className="absolute bottom-0 left-0 w-24 h-24 bg-amber-600/5 rounded-full blur-xl pointer-events-none" />
+
+            <div className="w-16 h-16 rounded-2xl bg-gradient-to-br from-[#efd383] to-amber-600 flex items-center justify-center text-black shadow-lg shadow-amber-500/10 mx-auto animate-pulse">
+              <span className="text-black font-black text-2xl font-mono">𓆩ع𓆪</span>
+            </div>
+
+            <div className="space-y-2">
+              <h2 className="text-xl font-black bg-gradient-to-r from-white via-amber-200 to-amber-400 bg-clip-text text-transparent">
+                بوابة الدخول الإجباري الآمنة 🔒
+              </h2>
+              <p className="text-xs text-slate-400 leading-relaxed font-semibold">
+                مرحباً بك في نظام عُفر المتقدم لاستضافة وتصميم المواقع بالذكاء الاصطناعي.
+                الوصول لهذه الخدمات والملفات السحابية يتطلب تسجيل الدخول الكلي لحماية مشاريعك وأكوادك البرمجية والتشغيلية.
+              </p>
+            </div>
+
+            <div className="bg-amber-500/5 border border-amber-500/10 rounded-xl p-4 text-xs text-amber-300 leading-relaxed font-bold">
+              ⚡ سجل دخولك الفوري لتتمكن من توليد وتعديل الأكواد ببرومبتات الحوسبة المتقدمة وسحابة الاستضافة اللحظية!
+            </div>
+
+            <div id="clerk-gate-signin-wrapper" className="bg-gradient-to-r from-amber-400 to-[#efd383] hover:brightness-110 rounded-xl text-black font-extrabold text-xs transition-all cursor-pointer shadow-lg shadow-amber-500/15">
+              <SignInButton mode="modal">
+                <button className="w-full px-5 py-3 cursor-pointer flex items-center justify-center gap-2 hover:scale-[1.01] active:scale-[0.99] transition-transform font-black">
+                  <Sparkles className="w-4 h-4 text-black animate-pulse" />
+                  <span>تسجيل الدخول الآمن عبر Clerk</span>
+                </button>
+              </SignInButton>
+            </div>
+
+            <button
+              onClick={() => setActiveTab("community")}
+              className="mt-2 text-xs text-slate-500 hover:text-amber-300 underline transition-colors cursor-pointer"
+            >
+              ← أو تصفح معرض المشاريع العام كزائر برمجيات
+            </button>
+          </div>
+        ) : (
+          <>
+            {/* ==================== SCREEN 1: STUDIO HOME ==================== */}
+            {activeTab === "studio" && (
+
           <div className="grid grid-cols-1 lg:grid-cols-12 gap-8 items-start">
             
             {/* Left Column: Mobile Simulator View mimicking the user Arabic layout */}
@@ -1547,11 +1796,6 @@ ${jsCode}
                   </button>
                   <button
                     onClick={() => {
-                      if (!currentUser) {
-                        triggerToast("⚠️ يرجى تسجيل الدخول أولاً لتتمكن من رفع وتعديل كود الموقع واستضافته.", "info");
-                        setShowAuthModal(true);
-                        return;
-                      }
                       setShowUploadModal(true);
                     }}
                     className="px-5 py-2.5 bg-neutral-900 hover:bg-neutral-800 text-white font-semibold text-sm rounded-xl border border-white/10 transition duration-150"
@@ -1605,12 +1849,14 @@ ${jsCode}
                 onRefresh={() => currentUser && loadUserProjects(currentUser.uid)}
                 triggerToast={triggerToast}
                 publishingProjectId={publishingProjectId}
+                onTogglePublic={handleToggleProjectPrivacyCloud}
               />
 
               {/* Grid: Ready to start presets boostrappers */}
               <div className="space-y-3">
-                <h3 className="text-sm font-bold text-slate-400 font-mono tracking-wider uppercase">
-                  قوالب مسبقة سريعة (Click to start instantly in Editor)
+                <h3 className="text-sm font-black text-[#efd383] font-mono tracking-wider flex items-center gap-1.5 uppercase">
+                  <Award className="w-4 h-4 text-amber-400 animate-bounce" />
+                  حزم الانطلاق فائقة السرعة (عُفر Starter Kits)
                 </h3>
                 
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
@@ -1618,11 +1864,6 @@ ${jsCode}
                     <div 
                       key={tmpl.id}
                       onClick={() => {
-                        if (!currentUser) {
-                          triggerToast("⚠️ يرجى تسجيل الدخول أولاً لتتمكن من إدارة وتطوير القوالب.", "info");
-                          setShowAuthModal(true);
-                          return;
-                        }
                         loadPresetTemplate(tmpl);
                         setActiveTab("editor");
                       }}
@@ -1667,7 +1908,7 @@ ${jsCode}
                 ) : hostedSites.length === 0 ? (
                   <div className="text-center py-12 border border-dashed border-white/5 rounded-xl">
                     <Cloud className="w-12 h-12 text-slate-600 mx-auto mb-3" />
-                    <p className="text-sm text-slate-400">لا توجد مواقع منشورة حالياً في الشبكة العامة.</p>
+                    <p className="text-sm text-slate-400">لم تقم بإنشاء أي موقع بعد.</p>
                     <p className="text-xs text-slate-500 mt-1">كن أول من ينشر موقعه ويظهر اسمه هنا لخدمة زبائنك!</p>
                   </div>
                 ) : (
@@ -1738,7 +1979,9 @@ ${jsCode}
                               </a>
                             </div>
                           </div>
+
                         </div>
+
                       );
                     })}
                   </div>
@@ -2025,6 +2268,37 @@ ${jsCode}
         {activeTab === "editor" && (
           <div className="space-y-4">
             
+            {/* Read-Only Cloned Project Banner */}
+            {activeProjectOwnerId && currentUser && activeProjectOwnerId !== currentUser.uid && (
+              <div dir="rtl" className="bg-[#efd383]/10 border border-[#efd383]/30 p-3.5 rounded-xl flex items-center justify-between gap-3 text-right flex-wrap sm:flex-nowrap">
+                <div className="flex items-center gap-3">
+                  <div className="w-10 h-10 rounded-full bg-[#efd383]/15 flex items-center justify-center text-[#efd383] shrink-0">
+                    <ShieldAlert className="w-5 h-5 animate-pulse" />
+                  </div>
+                  <div>
+                    <h4 className="text-xs font-black text-white">معاينة مشروع مستنسخ (معاينة فقط) 🔒</h4>
+                    <p className="text-[11px] text-[#efd383]/85 mt-0.5">
+                      أنت تتصفح حالياً الأكواد البرمجية لمشروع يمتلكه مستخدم آخر (صاحب العمل الأساسي). هذا المشروع للقراءة فقط لضمان الملكية الحصرية للأكواد. يمكنك النقر على الزر لاستنساخه والبدء بإنشاء تطبيقك الخاص!
+                    </p>
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => {
+                    const matchedProj = publicProjects.find(p => p.projectId === activeProjectId) || userProjects.find(p => p.projectId === activeProjectId);
+                    const originalPrompt = matchedProj?.originalPrompt || "تصميم متجر إلكتروني فاخر باللون الذهبي";
+                    setAiPrompt(originalPrompt);
+                    setActiveTab("generator");
+                    triggerToast("✨ تم سحب الفكرة ونقلها لمولد الذكاء الاصطناعي لكتابة نسختك المستقلة!", "success");
+                  }}
+                  className="px-3.5 py-2 bg-gradient-to-r from-amber-400 to-[#efd383] text-black font-extrabold text-[11px] rounded-lg shadow-sm hover:scale-[1.02] active:scale-[0.98] transition-transform flex items-center gap-1.5 cursor-pointer whitespace-nowrap shrink-0"
+                >
+                  <Copy className="w-3.5 h-3.5" />
+                  <span>استخدام هذا البرومبت 🚀</span>
+                </button>
+              </div>
+            )}
+            
             {/* Meta Control Ribbon bar */}
             <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center bg-[#090e18] border border-blue-900/30 p-4 rounded-xl gap-4">
               <div className="space-y-1 w-full sm:w-auto">
@@ -2059,8 +2333,8 @@ ${jsCode}
                 <button
                   id="btn-cloud-save-project"
                   onClick={handleSaveProjectToCloud}
-                  disabled={isSavingProjectCloud}
-                  className="px-3.5 py-1.5 bg-amber-950/40 hover:bg-amber-900/60 border border-amber-500/30 hover:border-amber-400 text-xs text-amber-300 hover:text-amber-100 rounded-lg flex items-center gap-1.5 transition-all font-bold cursor-pointer"
+                  disabled={isSavingProjectCloud || !!(activeProjectOwnerId && currentUser && activeProjectOwnerId !== currentUser.uid)}
+                  className="px-3.5 py-1.5 bg-amber-950/40 hover:bg-amber-900/60 border border-amber-500/30 hover:border-amber-400 text-xs text-amber-300 hover:text-amber-100 rounded-lg flex items-center gap-1.5 transition-all font-bold cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
                 >
                   {isSavingProjectCloud ? (
                     <RefreshCw className="w-3.5 h-3.5 animate-spin" />
@@ -2270,6 +2544,7 @@ ${jsCode}
               hostedSites={hostedSites}
               onRefreshSites={fetchSites}
               triggerToast={triggerToast}
+              currentUser={currentUser}
             />
 
             {/* AI-Powered Uptime Monitoring Live Dashboard */}
@@ -2374,7 +2649,7 @@ ${jsCode}
             ) : hostedSites.length === 0 ? (
               <div className="py-20 text-center text-slate-500 flex flex-col items-center justify-center gap-4 bg-black/40 rounded-xl border border-dashed border-white/5" dir="rtl">
                 <Server className="w-10 h-10 text-slate-700" />
-                <p className="text-sm">لا يوجد أي مواقع ويب مستضافة حالياً باسم عُمَر.</p>
+                <p className="text-sm">لم تقم بإنشاء أي موقع بعد.</p>
                 <button
                   onClick={() => setActiveTab("generator")}
                   className="px-4 py-2 bg-gradient-to-r from-amber-400 to-[#efd383] text-black hover:opacity-90 rounded-lg text-xs font-bold transition-all cursor-pointer"
@@ -2536,49 +2811,402 @@ ${jsCode}
           </div>
         )}
 
-      </main>
 
-      {/* 2. Authentication gating modal (فرض تسجيل الدخول) */}
-      {showAuthModal && (
-        <div className="fixed inset-0 bg-black/90 backdrop-blur-md flex items-center justify-center p-4 z-[100] animate-fade-in" dir="rtl">
-          <div className="bg-[#070b12] border-2 border-amber-500/30 rounded-2xl max-w-md w-full p-7 relative space-y-5 text-center shadow-[0_0_50px_rgba(245,158,11,0.15)] animate-scale-up">
+        {/* ==================== SCREEN 5: COMMUNITY PROJECTS HUB & LEADERS ==================== */}
+        {activeTab === "community" && (
+          <div className="space-y-8 animate-fade-in" dir="rtl">
             
-            <button
-              onClick={() => setShowAuthModal(false)}
-              className="absolute top-4 left-4 p-1.5 rounded-full bg-slate-900/60 hover:bg-slate-800 text-slate-400 hover:text-white transition-colors cursor-pointer"
-            >
-              <X className="w-4 h-4" />
-            </button>
-
-            <div className="space-y-2">
-              <div className="w-14 h-14 rounded-full bg-amber-500/10 flex items-center justify-center mx-auto border border-amber-500/30 animate-pulse">
-                <Sparkles className="w-7 h-7 text-amber-400" />
+            {/* Elegant Top Banner */}
+            <div className="bg-[#0a0a0d] border border-white/5 rounded-2xl p-6 md:p-8 flex flex-col md:flex-row justify-between items-center gap-6 shadow-2xl relative overflow-hidden">
+              <div className="absolute top-0 right-0 w-44 h-44 bg-[#efd383]/10 rounded-full blur-3xl pointer-events-none" />
+              <div className="absolute bottom-0 left-0 w-32 h-32 bg-amber-600/5 rounded-full blur-2xl pointer-events-none" />
+              
+              <div className="space-y-1.5 text-right md:-mt-1">
+                <div className="inline-flex items-center gap-1.5 bg-amber-500/10 text-[#efd383] text-[10px] uppercase font-black tracking-widest px-2.5 py-1 rounded-full border border-amber-500/20">
+                  <Globe className="w-3.5 h-3.5 animate-spin-slow text-[#efd383]" />
+                  <span>عُفر SaaS Community Hub</span>
+                </div>
+                <h2 className="text-xl md:text-2xl font-black text-white">معرض واستكشاف المشاريع العامة لمجتمع عُفر</h2>
+                <p className="text-slate-400 text-xs max-w-2xl leading-relaxed">
+                  هنا يجتمع مبدعو عُفر! تصفح وانسخ واستلهم من أفكار ومواقع مستخدمين آخرين. اضغط على "استخدام الفكرة" لتوليد وتطوير نسختك السحابية المستقلة بنقرة واحدة.
+                </p>
               </div>
-              <h3 className="text-xl font-black text-[#efd383]">منصة LoomHost AI المميّزة</h3>
-              <p className="text-xs text-slate-400 max-w-xs mx-auto leading-relaxed">
-                يرجى تسجيل الدخول المباشر سحابياً لمزامنة تصاميمك، وعزل مشاريعك، وتفعيل لوحة الاستضافة التفاعلية بالكامل.
-              </p>
+
+              <div className="flex gap-4 sm:gap-6 items-center bg-white/[0.02] border border-white/5 p-4 rounded-xl shrink-0 self-stretch sm:self-auto justify-center">
+                <div className="text-center">
+                  <div className="text-[10px] text-slate-500 font-bold uppercase tracking-wider">المشاريع الملهمة</div>
+                  <div className="text-xl font-black text-[#efd383] font-mono mt-0.5">{publicProjects.length}</div>
+                </div>
+                <div className="border-r border-white/5 h-8"></div>
+                <div className="text-center">
+                  <div className="text-[10px] text-slate-500 font-bold uppercase tracking-wider">التفاعلات واللايكات</div>
+                  <div className="text-xl font-black text-[#efd383] font-mono mt-0.5">
+                    {publicProjects.reduce((acc, p) => acc + (p.likesCount || 0), 0)}
+                  </div>
+                </div>
+              </div>
             </div>
 
-            <div className="pt-2">
-              <button
-                onClick={handleDirectSignIn}
-                className="w-full py-3 px-4 bg-gradient-to-r from-amber-400 to-[#efd383] hover:from-amber-300 hover:to-amber-500 text-black font-extrabold text-sm rounded-xl transition duration-150 flex items-center justify-center gap-2 shadow-lg shadow-amber-500/10 cursor-pointer"
-              >
-                <span>🌐</span>
-                <span>تسجيل الدخول الفوري عبر Google SSO</span>
-              </button>
-            </div>
+            {/* Smart Grid Layout: Main Feed & Leaderboard */}
+            <div className="grid grid-cols-1 lg:grid-cols-12 gap-8 items-start">
+              
+              {/* Main Feed */}
+              <div className="lg:col-span-8 space-y-6">
+                
+                {/* Search Bar & Categories Controller */}
+                <div className="bg-[#07080a] border border-white/5 rounded-xl p-4 flex flex-col md:flex-row gap-4 items-center justify-between">
+                  <div className="relative w-full md:max-w-md">
+                    <Search className="absolute right-3 top-2.5 h-4 w-4 text-slate-500" />
+                    <input
+                      type="text"
+                      placeholder="ابحث بالاسم، القالب، البرومبت أو مالك المشروع..."
+                      value={communitySearchTerm}
+                      onChange={(e) => setCommunitySearchTerm(e.target.value)}
+                      className="w-full bg-[#0a0a0f] border border-white/5 hover:border-amber-500/30 focus:border-amber-500 text-xs text-white placeholder-slate-500 rounded-xl pr-10 pl-4 py-2.5 focus:outline-none transition-colors text-right"
+                    />
+                  </div>
+                  <div className="flex items-center gap-1.5 self-start md:self-auto overflow-x-auto w-full md:w-auto pb-1 md:pb-0">
+                    <span className="text-[11px] text-slate-500 font-bold shrink-0 ml-1">تصفية القوالب:</span>
+                    {["all", "store", "dental", "saas", "portfolio"].map((cat) => (
+                      <button
+                        key={cat}
+                        type="button"
+                        onClick={() => setSelectedCategoryFilter(cat)}
+                        className={`text-[10px] font-bold px-3 py-1.5 rounded-lg border transition-all cursor-pointer shrink-0 ${
+                          selectedCategoryFilter === cat
+                            ? "bg-amber-950/20 border-amber-500/40 text-amber-300 shadow-[0_0_8px_rgba(239,211,131,0.1)]"
+                            : "bg-[#0a0a0f] border-white/5 text-slate-400 hover:text-white"
+                        }`}
+                      >
+                        {cat === "all" ? "الكل" : cat === "store" ? "متاجر" : cat === "dental" ? "عيادات" : cat === "saas" ? "SaaS" : "حساب شخصي"}
+                      </button>
+                    ))}
+                  </div>
+                </div>
 
-            <div className="text-[10px] text-slate-500 font-mono flex items-center justify-center gap-1.5">
-              <span>🔒 عزل أمني فائق (Data Isolation)</span>
-              <span>•</span>
-              <span>🔐 تشفير Google Cloud</span>
+                {/* Feed loading status */}
+                {loadingPublicProjects ? (
+                  <div className="space-y-4">
+                    {[1, 2, 3].map((s) => (
+                      <div key={s} className="bg-[#0a0a0f] p-5 rounded-2xl border border-white/5 animate-pulse space-y-4">
+                        <div className="flex justify-between items-center">
+                          <div className="h-4 bg-slate-800 rounded w-1/3" />
+                          <div className="h-3 bg-slate-800 rounded w-10" />
+                        </div>
+                        <div className="h-28 bg-[#0a0a0d] border border-white/5 rounded-xl flex items-center justify-center">
+                          <RefreshCw className="w-5 h-5 animate-spin text-amber-500/10" />
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                ) : filteredPublicProjects.length === 0 ? (
+                  <div className="text-center py-16 bg-[#0a0a0f] p-8 rounded-2xl border border-white/5 space-y-3">
+                    <div className="w-12 h-12 rounded-full bg-slate-900 border border-white/5 flex items-center justify-center text-slate-600 mx-auto">
+                      <Globe className="w-6 h-6" />
+                    </div>
+                    <h3 className="text-sm font-bold text-slate-300">لا توجد مشاريع مطابقة للبحث</h3>
+                    <p className="text-xs text-slate-500 max-w-sm mx-auto leading-relaxed">
+                      كن أنت المبدع الأول! توجه للرئيسية وفعل خيار الخصوصية "👁️ عام" على مشروعك السحابي ليظهر للجميع هنا فوراً.
+                    </p>
+                  </div>
+                ) : (
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                    {filteredPublicProjects.map((proj) => {
+                      const isLikedByUser = proj.likes?.includes(currentUser?.uid || "");
+                      return (
+                        <div 
+                          key={proj.projectId}
+                          className="bg-[#0a0a0f] hover:bg-[#0c0c14] border border-white/5 hover:border-amber-500/20 rounded-2xl p-5 transition-all duration-300 shadow-xl flex flex-col justify-between"
+                        >
+                          <div className="space-y-3">
+                            <div className="flex justify-between items-start gap-4">
+                              <div className="space-y-1">
+                                <h3 className="font-black text-sm text-slate-100">{proj.name}</h3>
+                                <div className="flex items-center gap-1.5 text-[9px]">
+                                  <span className="text-[#efd383] font-black">{proj.creatorName || "مطور عُفر المبدع"}</span>
+                                  <span className="text-slate-600">•</span>
+                                  <span className="text-slate-500 truncate max-w-[120px]">{proj.projectId}.omar.com</span>
+                                </div>
+                              </div>
+                              <span className="inline-flex items-center text-[8px] px-1.5 py-0.5 rounded bg-amber-500/10 text-[#efd383] border border-amber-500/20">
+                                نشاط عام
+                              </span>
+                            </div>
+
+                            <p className="text-[11px] text-slate-400 bg-black/40 border border-white/5 p-2 rounded-lg line-clamp-2 italic" dir="rtl">
+                              "{proj.description || "لا يوجد وصف برومبت مدرج للمشروع."}"
+                            </p>
+
+                            {/* Laptop illustration simulating the site design */}
+                            <div className="relative border border-white/5 rounded-xl overflow-hidden aspect-video max-h-[140px] bg-neutral-950 group shadow-inner">
+                              <iframe
+                                srcDoc={`<html><style>${proj.css}</style><body>${proj.html}</body></html>`}
+                                className="w-full h-full pt-2 pointer-events-none opacity-90 group-hover:scale-[1.01] transition-transform duration-300"
+                                title={proj.name}
+                                loading="lazy"
+                              />
+                              <div className="absolute inset-0 bg-gradient-to-t from-[#0a0a0f] to-transparent opacity-50" />
+                            </div>
+                          </div>
+
+                          <div className="flex items-center justify-between gap-1 mt-4 pt-3 border-t border-white/5">
+                            <div className="flex items-center gap-1.5">
+                              <button
+                                type="button"
+                                onClick={() => handleLikeProjectCloud(proj.projectId, proj.userId)}
+                                className={`text-[10px] font-bold px-2 py-1 rounded-lg border transition-all cursor-pointer flex items-center gap-1 ${
+                                  isLikedByUser
+                                    ? "bg-rose-950/20 border-rose-500/40 text-rose-400 font-extrabold"
+                                    : "bg-white/[0.02] border-white/5 text-slate-400 hover:text-white"
+                                }`}
+                              >
+                                <span>{isLikedByUser ? "❤️" : "🤍"}</span>
+                                <span className="font-mono text-[9px]">
+                                  {proj.likesCount || 0}
+                                </span>
+                              </button>
+                              <span className="text-[9px] text-slate-500 font-mono">
+                                🔄 {proj.clonesCount || 0}
+                              </span>
+                            </div>
+
+                            <div className="flex items-center gap-1">
+                              <button
+                                type="button"
+                                onClick={() => handleLoadProjectCloudIntoEditor(proj)}
+                                className="text-[9px] font-bold px-2 py-1 bg-neutral-900 border border-white/5 hover:border-amber-500/20 text-slate-300 rounded-lg transition-all cursor-pointer"
+                              >
+                                كود 📝
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  setCloningPromptText(proj.description || "لوحة تحكم عُفر الذكية");
+                                  setCloningProjectId(proj.projectId);
+                                  setCloningOwnerId(proj.userId);
+                                  setCloningPromptModalOpen(true);
+                                }}
+                                className="text-[9px] font-black px-2.5 py-1 bg-gradient-to-r from-amber-400 to-[#efd383] text-black rounded-lg transition-all hover:scale-[1.02] cursor-pointer"
+                              >
+                                html
+                                استنساخ 🚀
+                              </button>
+                            </div>
+                          </div>
+
+                          {/* 💬 Nested Comments Discussion Board */}
+                          <div className="mt-4 pt-3 border-t border-white/5">
+                            <ProjectCommentsSection 
+                              projectId={proj.projectId}
+                              currentUser={currentUser}
+                              triggerToast={triggerToast}
+                            />
+                          </div>
+                        </div>
+                      )
+                    })}
+                  </div>
+                )}
+              </div>
+
+              {/* Leaderboard Column */}
+              <div className="lg:col-span-4 space-y-6">
+                <div className="bg-[#0a0a0f] border border-white/5 rounded-2xl p-5 shadow-2xl relative overflow-hidden space-y-5">
+                  <div className="absolute top-0 left-0 w-32 h-32 bg-[#efd383]/5 rounded-full blur-2xl pointer-events-none" />
+                  
+                  <div className="border-b border-white/5 pb-3">
+                    <h3 className="text-md font-black text-[#efd383] flex items-center gap-2">
+                      <Award className="w-5 h-5 text-amber-400 animate-bounce" />
+                      قائمة صدارة عُفر الأكثر تفاعلاً 🏆
+                    </h3>
+                    <p className="text-[10px] text-slate-500 leading-relaxed mt-1">
+                      المشاريع الأكثر استنساخاً وتفاعلاً من قبل منشئي المواقع بالذكاء الاصطناعي.
+                    </p>
+                  </div>
+
+                  <div className="space-y-3">
+                    {leaderboardProjects.map((entry, index) => (
+                      <div 
+                        key={entry.projectId} 
+                        className={`flex items-center justify-between p-3 rounded-xl border transition-all ${
+                          index === 0
+                            ? "bg-amber-500/5 border-amber-500/20"
+                            : "bg-[#050508]/85 border-white/5"
+                        }`}
+                      >
+                        <div className="flex items-center gap-2 min-w-0">
+                          <div className={`w-5.5 h-5.5 rounded-lg text-xs font-black flex items-center justify-center shrink-0 ${
+                            index === 0 ? "bg-amber-400 text-black" : "bg-slate-900 border border-white/5 text-slate-500"
+                          }`}>
+                            {index === 0 ? "🥇" : index + 1}
+                          </div>
+                          <div className="min-w-0">
+                            <h4 className="text-xs font-bold text-slate-200 truncate">{entry.name}</h4>
+                            <span className="text-[8px] text-slate-500 font-black">{entry.creatorName || "مطور عُفر"}</span>
+                          </div>
+                        </div>
+                        <div className="text-left shrink-0">
+                          <span className="text-[9px] font-black text-amber-300 font-mono">{entry.clonesCount || 0} نسخ</span>
+                        </div>
+                      </div>
+                    ))}
+                    {leaderboardProjects.length === 0 && (
+                      <div className="text-center py-6 text-xs text-slate-500 font-mono">
+                        المجال مفتوح حالياً لتكون المتصدر الأول! 🚀
+                      </div>
+                    )}
+                  </div>
+                </div>
+
+                <div className="border border-[#efd383]/10 rounded-2xl bg-gradient-to-br from-[#0c0d12] to-black p-5 relative overflow-hidden space-y-3">
+                  <div className="w-9 h-9 rounded-xl bg-amber-500/10 border border-amber-500/20 flex items-center justify-center text-amber-400">
+                    <Shield className="w-4 h-4" />
+                  </div>
+                  <h4 className="text-xs font-black text-white">حماية الملكية وعزل المشاريع 🔒</h4>
+                  <p className="text-[10px] text-slate-400 leading-relaxed">
+                    عبر منصة عُفر، يملك المطور الأصلي لوحده حقوق التحرير الفورية والتعديل المباشر للأكواد المرفوعة. يمكن لأي شخص استنساخ الفكرة لتبدأ معه صفحة تطوير نظيفة ومعزولة بالكامل دون قلق.
+                  </p>
+                </div>
+              </div>
+
             </div>
 
           </div>
-        </div>
-      )}
+        )}
+
+        {/* ==================== SCREEN 6: USER PROFILE ==================== */}
+        {activeTab === "profile" && (
+          <div className="space-y-8 animate-fade-in text-right" dir="rtl">
+            <div className="bg-[#0a0a0d] border border-white/5 rounded-2xl p-6 md:p-8 flex flex-col md:flex-row justify-between items-center gap-6 shadow-2xl relative overflow-hidden">
+              <div className="absolute top-0 right-0 w-44 h-44 bg-amber-500/10 rounded-full blur-3xl pointer-events-none" />
+              <div className="absolute bottom-0 left-0 w-32 h-32 bg-amber-600/5 rounded-full blur-2xl pointer-events-none" />
+              
+              <div className="flex flex-col md:flex-row items-center gap-5 w-full md:w-auto">
+                {currentUser?.photoURL ? (
+                  <img
+                    src={currentUser.photoURL}
+                    alt={currentUser.displayName || currentUser.name}
+                    className="w-20 h-20 rounded-2xl border-2 border-amber-500/40 object-cover shadow-lg shadow-amber-500/10"
+                    referrerPolicy="no-referrer"
+                  />
+                ) : (
+                  <div className="w-20 h-20 rounded-2xl bg-[#efd383]/10 border-2 border-amber-500/30 flex items-center justify-center text-amber-400">
+                    <User className="w-10 h-10" />
+                  </div>
+                )}
+                
+                <div className="space-y-1.5 text-center md:text-right">
+                  <div className="inline-flex items-center gap-1.5 bg-amber-500/10 text-[#efd383] text-[9px] uppercase font-black px-2.5 py-0.5 rounded-full border border-amber-500/20">
+                    <Sparkles className="w-3 h-3 text-amber-400 animate-pulse" />
+                    <span>مستوى المطور: {currentUser?.subscriptionPlan || "عضو أساسي"}</span>
+                  </div>
+                  <h2 className="text-xl md:text-2xl font-black text-white">{currentUser?.displayName || currentUser?.name || "مطور عُفر المبدع"}</h2>
+                  <p className="text-slate-400 text-xs font-mono">{currentUser?.email || "developer@loomhost.ai"}</p>
+                </div>
+              </div>
+
+              <div className="flex gap-4 items-center bg-white/[0.02] border border-white/5 p-4 rounded-xl shrink-0 self-stretch sm:self-auto justify-center">
+                <div className="text-center font-mono">
+                  <div className="text-[10px] text-slate-500 font-bold uppercase tracking-wider">مشاريعك السحابية</div>
+                  <div className="text-xl font-black text-[#efd383]">{userProjects.length}</div>
+                </div>
+                <div className="border-r border-white/5 h-8"></div>
+                <div className="text-center font-mono">
+                  <div className="text-[10px] text-slate-500 font-bold uppercase tracking-wider">المصنفة عامة</div>
+                  <div className="text-xl font-black text-[#efd383]">{userProjects.filter(p => p.isPublic).length}</div>
+                </div>
+              </div>
+            </div>
+
+            {/* List of projects owned with toggles */}
+            <div className="bg-[#0a0a10] border border-white/5 rounded-2xl p-6 shadow-2xl space-y-6 animate-fade-in">
+              <div className="border-b border-white/5 pb-4 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+                <div className="space-y-1 text-right">
+                  <h3 className="text-md font-black text-white flex items-center gap-2">
+                    <Code2 className="w-5 h-5 text-amber-400" />
+                    إدارة وتحكم الخصوصية بالملفات السحابية 📂
+                  </h3>
+                  <p className="text-xs text-slate-400 leading-relaxed">
+                    من هنا يمكنك التحكم في تفعيل خيار العرض العام لموقعك في المعرض المجتمعي أو حجب الوصول الخارجي وجوانب النسخ.
+                  </p>
+                </div>
+              </div>
+
+              {loadingProjects ? (
+                <div className="space-y-4">
+                  {[1, 2].map(s => (
+                    <div key={s} className="h-16 bg-[#04040a]/40 rounded-xl border border-white/5 animate-pulse" />
+                  ))}
+                </div>
+              ) : userProjects.length === 0 ? (
+                <div className="text-center py-12 border border-dashed border-white/5 rounded-xl text-slate-500 space-y-3">
+                  <h4 className="text-xs font-bold text-slate-400">لا تملك أي مشاريع سحابية حالياً في الحساب</h4>
+                  <p className="text-[10px] text-slate-500 max-w-sm mx-auto">
+                    توجه إلى مولد الذكاء الاصطناعي "توليد الـ AI" وقم بصناعة قالبك المباشر وحفظه سحابياً لكي يظهر هنا فوراً.
+                  </p>
+                </div>
+              ) : (
+                <div className="divide-y divide-white/5 font-sans">
+                  {userProjects.map((project) => (
+                    <div key={project.projectId} className="py-4 flex flex-col sm:flex-row sm:items-center justify-between gap-4 first:pt-0 last:pb-0 group">
+                      <div className="space-y-1 text-right">
+                        <div className="flex items-center gap-2">
+                          <h4 className="text-sm font-black text-white group-hover:text-amber-300 transition-colors">{project.name}</h4>
+                          <span className={`text-[8.5px] px-1.5 py-0.5 rounded-md font-mono ${
+                            project.isPublic 
+                              ? "bg-amber-500/10 text-amber-300 border border-amber-500/20" 
+                              : "bg-slate-950 text-slate-500 border border-slate-800"
+                          }`}>
+                            {project.isPublic ? "🌍 عام" : "🔒 خاص"}
+                          </span>
+                        </div>
+                        <p className="text-xs text-slate-400 max-w-xl truncate">{project.description || "لا يوجد وصف مدخل لهذا المشروع السحابي."}</p>
+                        <div className="text-[10px] text-slate-500 font-mono">
+                          مُعرّف: {project.projectId} • تاريخ الإنشاء: {new Date(project.createdAt?.seconds ? (project.createdAt.seconds * 1000) : (project.createdAt || Date.now())).toLocaleDateString("ar-EG")}
+                        </div>
+                      </div>
+
+                      {/* Toggle Controller & Controls */}
+                      <div className="flex items-center gap-4 shrink-0 justify-end">
+                        {/* Switch privacy item */}
+                        <div className="flex items-center gap-2">
+                          <span className="text-[11px] text-slate-400 font-bold">العرض في المعرض:</span>
+                          <button
+                            type="button"
+                            onClick={() => handleToggleProjectPrivacyCloud(project.projectId, !project.isPublic)}
+                            className={`w-11 h-6 rounded-full p-1 transition-all relative cursor-pointer ${
+                              project.isPublic ? "bg-[#efd383]" : "bg-neutral-800"
+                            }`}
+                          >
+                            <div className={`w-4 h-4 rounded-full bg-black shadow-md transition-all absolute top-1 ${
+                              project.isPublic ? "right-1" : "right-6"
+                            }`} />
+                          </button>
+                        </div>
+
+                        <div className="border-r border-white/5 h-8"></div>
+
+                        <button
+                          type="button"
+                          onClick={() => handleLoadProjectCloudIntoEditor(project)}
+                          className="px-3 py-1.5 bg-neutral-900 border border-white/5 hover:border-amber-500/20 text-[#efd383] text-xs font-black rounded-lg transition-all cursor-pointer"
+                        >
+                          تعديل 📝
+                        </button>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          </div>
+        )}
+
+          </>
+        )}
+
+      </main>
+
 
       {/* 2. Deletion Confirmation Modal (مربع تأكيد الحذف البرمجي الفاخر) */}
       {siteToDeleteId && (
@@ -2607,6 +3235,68 @@ ${jsCode}
                 className="flex-1 py-2.5 bg-neutral-900 border border-white/10 hover:bg-neutral-800 text-slate-300 font-bold text-xs rounded-xl transition duration-150 cursor-pointer"
               >
                 إلغاء التراجع
+              </button>
+            </div>
+
+          </div>
+        </div>
+      )}
+
+      {/* 2.5 Clone Prompt Modal System (النافذة العائمة لاستنساخ الفكرة والبرومبت) */}
+      {cloningPromptModalOpen && (
+        <div className="fixed inset-0 bg-black/90 backdrop-blur-md flex items-center justify-center p-4 z-[100] animate-fade-in" dir="rtl">
+          <div className="bg-[#090b10] border-2 border-amber-500/20 rounded-2xl max-w-lg w-full p-6 relative space-y-5 text-right shadow-2xl animate-scale-up">
+            
+            <button
+              onClick={() => setCloningPromptModalOpen(false)}
+              className="absolute top-4 left-4 p-1 rounded-full bg-[#efd383]/5 hover:bg-[#efd383]/10 text-slate-400 hover:text-white transition-colors cursor-pointer"
+            >
+              <X className="w-4 h-4" />
+            </button>
+
+            <div className="space-y-2">
+              <div className="w-12 h-12 rounded-full bg-amber-500/10 flex items-center justify-center border border-amber-500/20 text-[#efd383]">
+                <Sparkles className="w-6 h-6 animate-pulse" />
+              </div>
+              <h3 className="text-lg font-black text-white">استنساخ الفكرة وتوليد نسختك الخاصة 🚀</h3>
+              <p className="text-xs text-slate-400 leading-relaxed">
+                هذا هو البرومبت الأصلي المستخدم لبناء هذا الموقع الإبداعي. يمكنك بنقرة واحدة نسخ النص أو الانتقال المباشر للمولد الذكي لصياغة نسختك المستقلة وترقيتها سحابياً!
+              </p>
+            </div>
+
+            <div className="bg-black/60 border border-white/5 rounded-xl p-4 relative">
+              <span className="absolute left-3 top-3 text-[9px] text-[#efd383] bg-amber-500/10 border border-amber-500/20 px-1.5 py-0.5 rounded font-bold uppercase font-mono">
+                البرومبت الأصلي
+              </span>
+              <textarea
+                readOnly
+                value={cloningPromptText}
+                rows={4}
+                className="w-full bg-transparent border-none text-slate-200 text-xs focus:outline-none resize-none pt-4 text-right leading-relaxed font-medium"
+              />
+            </div>
+
+            <div className="flex gap-3 pt-2">
+              <button
+                onClick={() => {
+                  navigator.clipboard.writeText(cloningPromptText);
+                  triggerToast("📋 تم نسخ البرومبت الأصلي المولد بنجاح للحافظة!", "success");
+                }}
+                className="flex-1 py-2.5 bg-neutral-900 border border-white/10 hover:border-amber-500/20 text-slate-200 font-extrabold text-xs rounded-xl transition duration-150 cursor-pointer flex items-center justify-center gap-1.5"
+              >
+                <Copy className="w-4 h-4 text-[#efd383]" />
+                <span>نسخ البرومبت 📋</span>
+              </button>
+              
+              <button
+                onClick={() => {
+                  handleClonePromptUse(cloningProjectId, cloningPromptText, cloningOwnerId);
+                  setCloningPromptModalOpen(false);
+                }}
+                className="flex-1 py-2.5 bg-gradient-to-r from-amber-400 to-[#efd383] hover:brightness-110 text-black font-extrabold text-xs rounded-xl transition duration-150 cursor-pointer flex items-center justify-center gap-1.5 shadow-lg shadow-amber-500/10"
+              >
+                <Sparkles className="w-4 h-4 text-black animate-pulse" />
+                <span>عجلات التوليد الفوري ⚡</span>
               </button>
             </div>
 

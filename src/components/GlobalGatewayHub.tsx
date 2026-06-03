@@ -17,7 +17,9 @@ import {
   Zap,
   CheckCircle,
   HelpCircle,
-  Clock
+  Clock,
+  Sliders,
+  Shield
 } from "lucide-react";
 import { HostedSite } from "../types";
 
@@ -25,12 +27,14 @@ interface GlobalGatewayHubProps {
   hostedSites: HostedSite[];
   onRefreshSites: () => Promise<void>;
   triggerToast: (msg: string, type: "success" | "error" | "info") => void;
+  currentUser: any;
 }
 
 export const GlobalGatewayHub: React.FC<GlobalGatewayHubProps> = ({
   hostedSites,
   onRefreshSites,
-  triggerToast
+  triggerToast,
+  currentUser
 }) => {
   const [copiedId, setCopiedId] = useState<string | null>(null);
   const [isWarmingUp, setIsWarmingUp] = useState<boolean>(true);
@@ -49,6 +53,94 @@ export const GlobalGatewayHub: React.FC<GlobalGatewayHubProps> = ({
   const [retryCounter, setRetryCounter] = useState<number>(0);
   const [isRetrying, setIsRetrying] = useState<boolean>(false);
 
+  // GCloud Run simulation states
+  const [expandedSiteId, setExpandedSiteId] = useState<string | null>(null);
+  const [minInstances, setMinInstances] = useState<number>(1);
+  const [maxInstances, setMaxInstances] = useState<number>(5);
+  const [isActionExecuting, setIsActionExecuting] = useState<boolean>(false);
+
+  // Append logs dynamically
+  const addLog = useCallback((message: string) => {
+    const timestamp = new Date().toLocaleTimeString("ar-SA", { hour12: false });
+    setGatewayLogs(prev => [`[${timestamp}] ${message}`, ...prev.slice(0, 40)]);
+  }, []);
+
+  const handleRestartCloudRun = async (siteId: string) => {
+    if (!currentUser) {
+      triggerToast("🔐 يرجى تسجيل الدخول أولاً للتحقق من هويتك وصلاحياتك السحابية.", "error");
+      return;
+    }
+    setIsActionExecuting(true);
+    addLog(`⚙️ [Cloud Run API] جاري ترحيل طلب إعادة التشغيل للحاوية للموقع: ${siteId}...`);
+    try {
+      const res = await fetch("/api/cloudrun/restart", {
+        method: "POST",
+        headers: { 
+          "Content-Type": "application/json",
+          "Authorization": `Bearer ${currentUser.uid}`
+        },
+        body: JSON.stringify({ siteId })
+      });
+
+      if (!res.ok) {
+        if (res.status === 403) {
+          throw new Error("انتهاك صلاحيات 403: لا تملك حق الوصول لإعادة تشغيل الحاويات لغير موقعك.");
+        }
+        const errData = await res.json();
+        throw new Error(errData.error || "فشل إعادة التشغيل.");
+      }
+
+      await res.json();
+      triggerToast("✅ تم إعادة تشغيل الحاوية السحابية بنجاح عبر API الخاص بـ Google Cloud Run!", "success");
+      addLog(`🟢 [Cloud Run API] تم إعادة التشغيل بنجاح! تم تنشيط الحاوية وتفادي الـ Cold Start.`);
+      playPingChime();
+      onRefreshSites();
+    } catch (err: any) {
+      triggerToast(err.message, "error");
+      addLog(`❌ [Cloud Run API] فشل الطلب: ${err.message}`);
+    } finally {
+      setIsActionExecuting(false);
+    }
+  };
+
+  const handleScaleCloudRun = async (siteId: string) => {
+    if (!currentUser) {
+      triggerToast("🔐 يرجى تسجيل الدخول أولاً للتحقق من هويتك وصلاحياتك السحابية.", "error");
+      return;
+    }
+    setIsActionExecuting(true);
+    addLog(`⚙️ [Cloud Run API] جاري إرسال إعدادات التوسيع القياسي والحد الأدنى والقصا...`);
+    try {
+      const res = await fetch("/api/cloudrun/scale", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "Authorization": `Bearer ${currentUser.uid}`
+        },
+        body: JSON.stringify({ siteId, minInstances, maxInstances })
+      });
+
+      if (!res.ok) {
+        if (res.status === 403) {
+          throw new Error("انتهاك صلاحيات 403: ليس لديك الصلاحية لتعديل موارد هذا النطاق السحابي.");
+        }
+        const errData = await res.json();
+        throw new Error(errData.error || "فشل تعديل التوسيع.");
+      }
+
+      await res.json();
+      triggerToast(`🔥 تم تحديث أبعاد الموارد السحابية بنجاح! حتمية الحاويات: ${minInstances} إلى ${maxInstances}.`, "success");
+      addLog(`🟢 [Cloud Run API] تم ضبط وتوسيع الحاويات بنجاح لمنع خمول الخادم للعميل.`);
+      playPingChime();
+      onRefreshSites();
+    } catch (err: any) {
+      triggerToast(err.message, "error");
+      addLog(`❌ [Cloud Run API Scale] فشل طلب التوسيع: ${err.message}`);
+    } finally {
+      setIsActionExecuting(false);
+    }
+  };
+
   // Stats calculation
   const totalSubdomains = hostedSites.length;
   
@@ -65,12 +157,6 @@ export const GlobalGatewayHub: React.FC<GlobalGatewayHubProps> = ({
       instances: isWarmingUp ? 3 : 1
     };
   }, [hostedSites, totalSubdomains, isWarmingUp]);
-
-  // Append logs dynamically
-  const addLog = useCallback((message: string) => {
-    const timestamp = new Date().toLocaleTimeString("ar-SA", { hour12: false });
-    setGatewayLogs(prev => [`[${timestamp}] ${message}`, ...prev.slice(0, 40)]);
-  }, []);
 
   // Soft sound alert notifier (Success sound node)
   const playPingChime = useCallback(() => {
@@ -347,64 +433,158 @@ export const GlobalGatewayHub: React.FC<GlobalGatewayHubProps> = ({
                 return (
                   <div 
                     key={site.id} 
-                    className="flex flex-col sm:flex-row justify-between items-start sm:items-center py-3.5 gap-3 hover:bg-white/[0.01] transition-all px-2 rounded-lg"
+                    className="flex flex-col py-3.5 border-b border-white/5 hover:bg-white/[0.01] transition-all px-2 rounded-lg"
                   >
-                    <div className="space-y-1 select-none">
-                      <div className="flex items-center gap-2">
-                        {isSslSecured ? (
-                          <span 
-                            className="inline-flex items-center gap-1 text-[9px] bg-emerald-950/20 text-emerald-400 px-1.5 py-0.5 rounded border border-emerald-500/10 font-bold"
-                            title="نطاق مشفر SSL ونشط حالياً في الشبكة"
-                          >
-                            <span className="w-1 h-1 rounded-full bg-emerald-500 animate-pulse" />
-                            نشط 🟢
+                    <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3">
+                      <div className="space-y-1 select-none">
+                        <div className="flex items-center gap-2">
+                          {isSslSecured ? (
+                            <span 
+                              className="inline-flex items-center gap-1 text-[9px] bg-emerald-950/20 text-emerald-400 px-1.5 py-0.5 rounded border border-emerald-500/10 font-bold"
+                              title="نطاق مشفر SSL ونشط حالياً في الشبكة"
+                            >
+                              <span className="w-1 h-1 rounded-full bg-emerald-500 animate-pulse" />
+                              نشط 🟢
+                            </span>
+                          ) : (
+                            <span 
+                              className="inline-flex items-center gap-1 text-[9px] bg-amber-950/20 text-amber-400 px-1.5 py-0.5 rounded border border-[#efd383]/10 font-bold animate-pulse"
+                              title="جاري تجهيز نظام تشفير SSL ونقش التوجيه على DNS"
+                            >
+                              <span className="w-1 h-1 rounded-full bg-amber-400 animate-ping" />
+                              جاري التفعيل 🟡
+                            </span>
+                          )}
+                          <h4 className="font-extrabold text-xs text-white leading-none">{site.name}</h4>
+                        </div>
+
+                        <div className="flex items-center gap-1 font-mono text-[11px] text-slate-400">
+                          <span className="bg-black/60 px-1.5 py-0.5 rounded border border-white/5 text-amber-300 select-all truncate max-w-[200px] sm:max-w-xs">
+                            {liveDomain}
                           </span>
-                        ) : (
-                          <span 
-                            className="inline-flex items-center gap-1 text-[9px] bg-amber-950/20 text-amber-400 px-1.5 py-0.5 rounded border border-[#efd383]/10 font-bold animate-pulse"
-                            title="جاري تجهيز نظام تشفير SSL ونقش التوجيه على DNS"
+                          
+                          {/* Elegant Copy Button */}
+                          <button
+                            onClick={() => handleCopy(liveDomain, site.id)}
+                            type="button"
+                            className="p-1 rounded bg-white/5 hover:bg-white/10 hover:text-white transition duration-150 text-slate-400 cursor-pointer"
+                            title="نسخ في الحافظة"
                           >
-                            <span className="w-1 h-1 rounded-full bg-amber-400 animate-ping" />
-                            جاري التفعيل 🟡
-                          </span>
-                        )}
-                        <h4 className="font-extrabold text-xs text-white leading-none">{site.name}</h4>
+                            {isCopied ? (
+                              <Check className="w-3 h-3 text-emerald-400" />
+                            ) : (
+                              <Copy className="w-3 h-3" />
+                            )}
+                          </button>
+                        </div>
                       </div>
 
-                      <div className="flex items-center gap-1 font-mono text-[11px] text-slate-400">
-                        <span className="bg-black/60 px-1.5 py-0.5 rounded border border-white/5 text-amber-300 select-all truncate max-w-[200px] sm:max-w-xs">
-                          {liveDomain}
-                        </span>
-                        
-                        {/* Elegant Copy Button */}
+                      <div className="flex items-center gap-2 self-stretch sm:self-auto justify-between">
+                        <div className="text-[10px] text-slate-400 font-mono bg-[#0c0d12] px-2.5 py-1 rounded border border-white/5">
+                          Latency: <strong className="text-emerald-400">{site.responseTimeMs || 24}ms</strong>
+                        </div>
+
+                        {/* Collapsible Cloud Run Panel Toggle */}
                         <button
-                          onClick={() => handleCopy(liveDomain, site.id)}
+                          onClick={() => {
+                            setExpandedSiteId(expandedSiteId === site.id ? null : site.id);
+                            setMinInstances(site.minInstances || 1);
+                            setMaxInstances(site.maxInstances || 5);
+                          }}
                           type="button"
-                          className="p-1 rounded bg-white/5 hover:bg-white/10 hover:text-white transition duration-150 text-slate-400 cursor-pointer"
-                          title="نسخ في الحافظة"
+                          className={`px-2.5 py-1.5 text-[10px] font-extrabold rounded-lg transition duration-150 flex items-center gap-1 cursor-pointer border ${expandedSiteId === site.id ? "bg-amber-500/20 text-amber-300 border-amber-500/30" : "bg-white/5 text-slate-300 border-white/5 hover:bg-white/10"}`}
+                          title="إدارة حاويات Google Cloud Run"
                         >
-                          {isCopied ? (
-                            <Check className="w-3 h-3 text-emerald-400" />
-                          ) : (
-                            <Copy className="w-3 h-3" />
-                          )}
+                          <Sliders className="w-3 h-3 animate-pulse" />
+                          <span>إدارة سحابية (GCloud)</span>
+                        </button>
+
+                        <button
+                          onClick={() => handlePreviewSiteWithGateway(site)}
+                          type="button"
+                          className="px-3 py-1.5 text-[10px] bg-amber-400/90 hover:bg-amber-400 text-black font-extrabold rounded-lg transition duration-150 flex items-center gap-1 cursor-pointer"
+                        >
+                          <Zap className="w-3 h-3" />
+                          <span>معاينة عبر البوابة 🌐</span>
                         </button>
                       </div>
                     </div>
 
-                    <div className="flex items-center gap-2.5 self-stretch sm:self-auto justify-between">
-                      <div className="text-[10px] text-slate-400 font-mono bg-[#0c0d12] px-2.5 py-1 rounded border border-white/5">
-                        Latency: <strong className="text-emerald-400">{site.responseTimeMs || 24}ms</strong>
+                    {/* Google Cloud Run Collapsible Integration Sub-Panel */}
+                    {expandedSiteId === site.id && (
+                      <div className="mt-3 p-4 bg-amber-950/5 border border-[#efd383]/10 rounded-xl space-y-4 animate-fade-in text-right">
+                        <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-2 border-b border-white/5 pb-2">
+                          <span className="text-[11px] font-bold text-amber-300 flex items-center gap-1.5">
+                            <Shield className="w-3.5 h-3.5 text-amber-400" />
+                            لوحة تحكم Google Cloud Run API للموقع النشط:
+                          </span>
+                          <span className="text-[9px] text-[#efd383] font-mono bg-amber-500/10 px-2 py-0.5 rounded border border-amber-500/20">
+                            صلاحيات آمنة مفعّلة (OAuth Identity Secured)
+                          </span>
+                        </div>
+
+                        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                          {/* Cloud Run Action: Restart */}
+                          <div className="p-3 bg-black/40 border border-white/5 rounded-lg space-y-2">
+                            <span className="text-[10px] font-black text-slate-200 block">إعادة التشغيل الفوري والساخن (Hot Restart Container)</span>
+                            <p className="text-[9px] text-slate-400 leading-relaxed">
+                              إرسال أمر API إلى Google Cloud Run لإلغاء جميع خيوط الذاكرة الميتة، وتطهير الكاش، وإعادة تشغيل الخادم السحابي دون عينات معطلة. (Zero-Downtime Rollout)
+                            </p>
+                            <button
+                              type="button"
+                              disabled={isActionExecuting}
+                              onClick={() => handleRestartCloudRun(site.id)}
+                              className="w-full py-1.5 bg-gradient-to-r from-rose-500/20 to-red-500/30 hover:from-rose-500/30 hover:to-red-500/40 text-rose-200 border border-rose-500/20 hover:border-rose-500/40 font-black text-[10px] rounded-lg transition-all flex items-center justify-center gap-1 cursor-pointer disabled:opacity-50"
+                            >
+                              <RefreshCw className={`w-3 h-3 ${isActionExecuting ? "animate-spin" : ""}`} />
+                              <span>إعادة تشغيل الحاوية سحابياً حياً 🔄</span>
+                            </button>
+                          </div>
+
+                          {/* Cloud Run Action: Scaling Adjust */}
+                          <div className="p-3 bg-black/40 border border-white/5 rounded-lg space-y-3">
+                            <span className="text-[10px] font-black text-slate-200 block">معايير موازنة التحميل (Scaling Instances Limits)</span>
+                            
+                            <div className="space-y-2">
+                              <div className="flex justify-between items-center text-[9px] text-slate-400 font-mono">
+                                <span>الحد الأدنى (Min Instances): {minInstances}</span>
+                                <span>معين حركياً لمنع الـ Cold Start</span>
+                              </div>
+                              <input 
+                                type="range" 
+                                min="1" 
+                                max="5" 
+                                value={minInstances} 
+                                onChange={(e) => setMinInstances(Number(e.target.value))}
+                                className="w-full accent-amber-500 cursor-pointer"
+                              />
+
+                              <div className="flex justify-between items-center text-[9px] text-slate-400 font-mono">
+                                <span>الحد الأقصى (Max Instances): {maxInstances}</span>
+                                <span>الاستجابة لزيادة الزوار المفاجئة</span>
+                              </div>
+                              <input 
+                                type="range" 
+                                min="5" 
+                                max="20" 
+                                value={maxInstances} 
+                                onChange={(e) => setMaxInstances(Number(e.target.value))}
+                                className="w-full accent-amber-500 cursor-pointer"
+                              />
+                            </div>
+
+                            <button
+                              type="button"
+                              disabled={isActionExecuting}
+                              onClick={() => handleScaleCloudRun(site.id)}
+                              className="w-full py-1.5 bg-gradient-to-r from-amber-400 to-[#efd383] hover:brightness-110 text-black font-extrabold text-[10px] rounded-lg transition duration-150 flex items-center justify-center gap-1 cursor-pointer disabled:opacity-50"
+                            >
+                              <span>تحديث وتطبيق معايير التوسيع السحابي 🔥</span>
+                            </button>
+                          </div>
+                        </div>
                       </div>
-                      <button
-                        onClick={() => handlePreviewSiteWithGateway(site)}
-                        type="button"
-                        className="px-3 py-1.5 text-[10px] bg-amber-400/90 hover:bg-amber-400 text-black font-extrabold rounded-lg transition duration-150 flex items-center gap-1 cursor-pointer"
-                      >
-                        <Zap className="w-3 h-3" />
-                        <span>معاينة عبر البوابة 🌐</span>
-                      </button>
-                    </div>
+                    )}
                   </div>
                 );
               })}
