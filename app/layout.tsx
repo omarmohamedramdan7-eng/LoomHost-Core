@@ -11,9 +11,14 @@ export default function RootLayout({
 }: {
   children: React.ReactNode;
 }) {
+  const publishableKey = process.env.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY || "";
+
   return (
-    <ClerkProvider>
-      <html lang="en" dir="ltr">
+    <ClerkProvider publishableKey={publishableKey}>
+      <html lang="ar" dir="rtl">
+        <head>
+          <meta name="referrer" content="no-referrer-when-downgrade" />
+        </head>
         <body className="antialiased bg-slate-950 text-white">
           {children}
         </body>

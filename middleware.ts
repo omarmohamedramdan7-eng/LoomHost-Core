@@ -21,7 +21,7 @@ export const config = {
     '/studio(.*)',
     '/editor(.*)',
     '/generator(.*)',
-    // Apply authentication to secure internal API routes, while leaving render endpoint open
-    '/api/(?!sites/render|public-projects)(.*)',
+    // Apply authentication to secure internal API routes, while leaving render endpoints open via code logic
+    '/api/(.*)',
   ],
 };
