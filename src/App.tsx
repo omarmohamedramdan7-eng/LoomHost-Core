@@ -706,6 +706,16 @@ document.getElementById('alert-trigger')?.addEventListener('click', () => {
   const iframeRef = useRef<HTMLIFrameElement | null>(null);
 
   const handleTabChange = (tab: ActiveTab) => {
+    if (tab !== "studio" && tab !== "community") {
+      if (!isSignedIn) {
+        if (typeof window !== "undefined") {
+          window.dispatchEvent(new Event("open-clerk-signin"));
+        } else {
+          alert("يرجى تسجيل الدخول السريع أولاً لتنفيذ هذا الإجراء والبدء في برمجة واستضافة مشاريعك.");
+        }
+        return;
+      }
+    }
     setActiveTab(tab);
   };
 
@@ -1575,7 +1585,7 @@ ${jsCode}
             <nav className="flex space-x-1 lg:space-x-2 rtl:space-x-reverse text-xs sm:text-sm">
               <button
                 id="tab-studio"
-                onClick={() => setActiveTab("studio")}
+                onClick={() => handleTabChange("studio")}
                 className={`px-3 py-1.5 rounded-lg transition-all border ${
                   activeTab === "studio"
                     ? "bg-amber-950/20 border-amber-500/40 text-amber-300 font-bold shadow-[0_0_12px_rgba(245,158,11,0.15)]"
@@ -1610,7 +1620,7 @@ ${jsCode}
               </button>
               <button
                 id="tab-deployments"
-                onClick={() => setActiveTab("deployments")}
+                onClick={() => handleTabChange("deployments")}
                 className={`px-3 py-1.5 rounded-lg transition-all flex items-center gap-1.5 relative border ${
                   activeTab === "deployments"
                     ? "bg-amber-950/20 border-amber-500/40 text-amber-300 font-bold shadow-[0_0_12px_rgba(245,158,11,0.15)]"
@@ -1627,7 +1637,7 @@ ${jsCode}
               </button>
               <button
                 id="tab-community"
-                onClick={() => setActiveTab("community")}
+                onClick={() => handleTabChange("community")}
                 className={`px-3 py-1.5 rounded-lg transition-all flex items-center gap-1.5 relative border ${
                   activeTab === "community"
                     ? "bg-amber-950/20 border-amber-500/40 text-[#efd383] font-bold shadow-[0_0_12px_rgba(245,158,11,0.15)]"
