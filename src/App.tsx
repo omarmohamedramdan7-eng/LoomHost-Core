@@ -57,6 +57,7 @@ import { CloudProjectsPanel } from "./components/CloudProjectsPanel";
 import { SignedIn, SignedOut, SignInButton, UserButton, useUser, isClerkConfigured } from "./clerk-bridge";
 import { GeminiStreamGenerator } from "./components/GeminiStreamGenerator";
 import { GlobalGatewayHub } from "./components/GlobalGatewayHub";
+import VideoPlayer from "./components/VideoPlayer";
 
 import { LocalUserProfile } from "./types";
 import { 
@@ -1866,6 +1867,22 @@ ${jsCode}
                     </div>
                   </div>
                 </div>
+              </div>
+
+              {/* 🎥 Protected Gated Video Player Panel */}
+              <div className="border border-white/5 rounded-2xl bg-black/30 p-4 sm:p-6 space-y-4">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-2">
+                    <span className="w-2.5 h-2.5 rounded-full bg-cyan-500 animate-ping" />
+                    <span className="text-xs font-bold text-slate-200">
+                      الشرح العملي لاستخدام الذكاء الاصطناعي السحابي
+                    </span>
+                  </div>
+                  <span className="text-[10px] py-0.5 px-2 rounded-full bg-cyan-500/10 text-cyan-400 border border-cyan-500/20">
+                    مستوى الحماية: عالي 🔒
+                  </span>
+                </div>
+                <VideoPlayer />
               </div>
 
               {/* Interactive Cloud-Saved Projects Management Panel */}

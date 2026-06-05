@@ -9,25 +9,25 @@ import { getFirestore } from "firebase/firestore";
 import { getAuth } from "firebase/auth";
 import appletConfig from "../firebase-applet-config.json";
 
-// We combine both the automatically provisioned applet config and Vite environment overrides
+// We prioritize the environment variables and fallback to local metadata/hardcoded defaults for loomhost-ai
 const firebaseConfig = {
-  apiKey: (import.meta as any).env?.VITE_FIREBASE_API_KEY || appletConfig.apiKey || "YOUR_API_KEY_HERE",
-  authDomain: (import.meta as any).env?.VITE_FIREBASE_AUTH_DOMAIN || appletConfig.authDomain || "YOUR_AUTH_DOMAIN_HERE",
-  projectId: (import.meta as any).env?.VITE_FIREBASE_PROJECT_ID || appletConfig.projectId || "YOUR_PROJECT_ID_HERE",
-  storageBucket: (import.meta as any).env?.VITE_FIREBASE_STORAGE_BUCKET || appletConfig.storageBucket || "YOUR_STORAGE_BUCKET_HERE",
-  messagingSenderId: (import.meta as any).env?.VITE_FIREBASE_MESSAGING_SENDER_ID || appletConfig.messagingSenderId || "YOUR_MESSAGING_SENDER_ID_HERE",
-  appId: (import.meta as any).env?.VITE_FIREBASE_APP_ID || appletConfig.appId || "YOUR_APP_ID_HERE"
+  apiKey: (import.meta as any).env?.VITE_FIREBASE_API_KEY || appletConfig.apiKey || "AIzaSyBNxUaEJGy1MI6ZdeMWM8KvBbD8pI03XxU",
+  authDomain: (import.meta as any).env?.VITE_FIREBASE_AUTH_DOMAIN || appletConfig.authDomain || "loomhost-ai.firebaseapp.com",
+  projectId: (import.meta as any).env?.VITE_FIREBASE_PROJECT_ID || appletConfig.projectId || "loomhost-ai",
+  storageBucket: (import.meta as any).env?.VITE_FIREBASE_STORAGE_BUCKET || appletConfig.storageBucket || "loomhost-ai.firebasestorage.app",
+  messagingSenderId: (import.meta as any).env?.VITE_FIREBASE_MESSAGING_SENDER_ID || appletConfig.messagingSenderId || "1042530707945",
+  appId: (import.meta as any).env?.VITE_FIREBASE_APP_ID || appletConfig.appId || "1:1042530707945:web:56741d40058577455ec378",
+  measurementId: (import.meta as any).env?.VITE_FIREBASE_MEASUREMENT_ID || appletConfig.measurementId || "G-LPK0E04GZZ"
 };
 
 // Initialize Firebase App
 const app = initializeApp(firebaseConfig);
 
-// Initialize Firebase Auth
-export const auth = getAuth(app);
-
-// Initialize Firestore & export
-// CRITICAL: The app will fail to communicate if we do not specify the correct database ID (e.g. enterprise instance id)
+// If VITE_FIREBASE_DATABASE_ID is explicitly set, or fallback to the applet database ID.
+// For standard Firebase projects using the default instance, we can configure without specifying a database ID.
 const dbId = (import.meta as any).env?.VITE_FIREBASE_DATABASE_ID || appletConfig.firestoreDatabaseId;
-export const db = getFirestore(app, dbId);
+
+export const db = dbId ? getFirestore(app, dbId) : getFirestore(app);
+export const auth = getAuth(app);
 
 export default app;
