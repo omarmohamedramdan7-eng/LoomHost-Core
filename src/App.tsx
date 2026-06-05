@@ -57,7 +57,6 @@ import { CloudProjectsPanel } from "./components/CloudProjectsPanel";
 import { SignedIn, SignedOut, SignInButton, UserButton, useUser, isClerkConfigured } from "./clerk-bridge";
 import { GeminiStreamGenerator } from "./components/GeminiStreamGenerator";
 import { GlobalGatewayHub } from "./components/GlobalGatewayHub";
-import VideoPlayer from "./components/VideoPlayer";
 
 import { LocalUserProfile } from "./types";
 import { 
@@ -1879,22 +1878,6 @@ ${jsCode}
                 </div>
               </div>
 
-              {/* 🎥 Protected Gated Video Player Panel */}
-              <div className="border border-white/5 rounded-2xl bg-black/30 p-4 sm:p-6 space-y-4">
-                <div className="flex items-center justify-between">
-                  <div className="flex items-center gap-2">
-                    <span className="w-2.5 h-2.5 rounded-full bg-cyan-500 animate-ping" />
-                    <span className="text-xs font-bold text-slate-200">
-                      الشرح العملي لاستخدام الذكاء الاصطناعي السحابي
-                    </span>
-                  </div>
-                  <span className="text-[10px] py-0.5 px-2 rounded-full bg-cyan-500/10 text-cyan-400 border border-cyan-500/20">
-                    مستوى الحماية: عالي 🔒
-                  </span>
-                </div>
-                <VideoPlayer />
-              </div>
-
               {/* Interactive Cloud-Saved Projects Management Panel */}
               <CloudProjectsPanel 
                 user={currentUser}
@@ -3251,6 +3234,19 @@ ${jsCode}
                           className="px-3 py-1.5 bg-neutral-900 border border-white/5 hover:border-amber-500/20 text-[#efd383] text-xs font-black rounded-lg transition-all cursor-pointer"
                         >
                           تعديل 📝
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            if (window.confirm("هل أنت متأكد من حذف هذا المشروع سحابياً نهائياً؟")) {
+                              handleDeleteProjectCloud(project.projectId);
+                              triggerToast("🗑️ تم حذف المشروع وتعديل مخازنك السحابية بنجاح.", "success");
+                            }
+                          }}
+                          className="p-1.5 bg-rose-500/10 hover:bg-rose-500/20 border border-rose-500/20 text-rose-400 rounded-lg transition-all cursor-pointer"
+                          title="حذف من السحابة 🗑️"
+                        >
+                          <Trash2 className="w-4 h-4" />
                         </button>
                       </div>
                     </div>
