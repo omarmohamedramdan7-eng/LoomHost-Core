@@ -14,6 +14,7 @@ import {
   HelpCircle,
   HelpCircle as QuestionIcon
 } from "lucide-react";
+import { useUser } from "../clerk-bridge";
 
 interface ImageToCodePanelProps {
   onCodeGenerated: (data: {
@@ -30,6 +31,7 @@ interface ImageToCodePanelProps {
 type CloneMode = "image" | "url";
 
 export const ImageToCodePanel: React.FC<ImageToCodePanelProps> = ({ onCodeGenerated, triggerToast }) => {
+  const { isSignedIn } = useUser();
   const [cloneMode, setCloneMode] = useState<CloneMode>("url");
   const [dragActive, setDragActive] = useState<boolean>(false);
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
@@ -122,6 +124,14 @@ export const ImageToCodePanel: React.FC<ImageToCodePanelProps> = ({ onCodeGenera
   };
 
   const handleStartClone = async () => {
+    if (!isSignedIn) {
+      if (typeof window !== "undefined") {
+        window.dispatchEvent(new Event("open-clerk-signin"));
+      }
+      triggerToast("🔐 يرجى تسجيل الدخول أولاً لتشغيل محرك الاستنساخ الذكي.", "info");
+      return;
+    }
+
     let payloadInput = "";
     let isImagePayload = false;
 

@@ -6,6 +6,7 @@
 
 import React, { useState } from "react";
 import { Sparkles, Check, Copy, Layers, ListChecks, HelpCircle, MonitorCheck, RefreshCw } from "lucide-react";
+import { useUser } from "../clerk-bridge";
 
 interface SeoOptimizerPanelProps {
   htmlCode: string;
@@ -35,26 +36,18 @@ export const SeoOptimizerPanel: React.FC<SeoOptimizerPanelProps> = ({
   onApplySeo,
   triggerToast
 }) => {
+  const { isSignedIn } = useUser();
   const [isLoading, setIsLoading] = useState<boolean>(false);
   const [seoResult, setSeoResult] = useState<SeoResult | null>(null);
   const [copiedMeta, setCopiedMeta] = useState<boolean>(false);
 
   const handleRunSeoAudit = async () => {
-    // Lazy Authentication Check
-    const localUserStr = localStorage.getItem("loom_host_local_user") || "{}";
-    let isGuest = true;
-    try {
-      const parsed = JSON.parse(localUserStr);
-      isGuest = !parsed.id || parsed.id.startsWith("usr_");
-    } catch (e) {}
-
-    const hasRealUser = !!localStorage.getItem("clerk_mock_signed_in") || !isGuest;
-    if (!hasRealUser) {
-      if ((window as any).openSignIn) {
-        (window as any).openSignIn();
-      } else {
-        alert("يرجى تسجيل الدخول أولاً لتشغيل فحص السيو.");
+    // Strict Authentication Check
+    if (!isSignedIn) {
+      if (typeof window !== "undefined") {
+        window.dispatchEvent(new Event("open-clerk-signin"));
       }
+      triggerToast("🔐 يرجى تسجيل الدخول أولاً لتشغيل فحص السيو والتحسين التلقائي.", "info");
       return;
     }
 

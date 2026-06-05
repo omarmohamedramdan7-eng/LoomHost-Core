@@ -1,5 +1,6 @@
 import React, { useState, useCallback, useMemo, useRef, useEffect } from "react";
 import { Sparkles, RefreshCw, AlertCircle } from "lucide-react";
+import { useUser } from "../clerk-bridge";
 
 interface GeminiStreamGeneratorProps {
   aiPrompt: string;
@@ -29,6 +30,7 @@ export const GeminiStreamGenerator: React.FC<GeminiStreamGeneratorProps> = React
   onGenerationSuccess,
   onGenerationFailure,
 }) => {
+  const { isSignedIn } = useUser();
   const [localIsGenerating, setLocalIsGenerating] = useState(false);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
   const [streamedText, setStreamedText] = useState<string>("");
@@ -53,18 +55,10 @@ export const GeminiStreamGenerator: React.FC<GeminiStreamGeneratorProps> = React
   const handleGenerate = useCallback(async () => {
     if (!aiPrompt.trim()) return;
 
-    // Lazy Authentication Check
-    const localUserStr = localStorage.getItem("loom_host_local_user") || "{}";
-    let isGuest = true;
-    try {
-      const parsed = JSON.parse(localUserStr);
-      isGuest = !parsed.id || parsed.id.startsWith("usr_");
-    } catch (e) {}
-
-    const hasRealUser = !!localStorage.getItem("clerk_mock_signed_in") || !isGuest;
-    if (!hasRealUser) {
-      if ((window as any).openSignIn) {
-        (window as any).openSignIn();
+    // Strict Authentication Check
+    if (!isSignedIn) {
+      if (typeof window !== "undefined") {
+        window.dispatchEvent(new Event("open-clerk-signin"));
       } else {
         alert("يرجى تسجيل الدخول أولاً لتوليد المواقع عبر الذكاء الاصطناعي.");
       }
@@ -171,7 +165,7 @@ export const GeminiStreamGenerator: React.FC<GeminiStreamGeneratorProps> = React
     }
 
     setLocalIsGenerating(false);
-  }, [aiPrompt, selectedStyle, selectedModel, isCloneAnalyzed, onStartGeneration, onGenerationSuccess, onGenerationFailure, activeKey]);
+  }, [aiPrompt, selectedStyle, selectedModel, isCloneAnalyzed, onStartGeneration, onGenerationSuccess, onGenerationFailure, activeKey, isSignedIn]);
 
   // Cancel currently running request
   const handleCancel = useCallback(() => {

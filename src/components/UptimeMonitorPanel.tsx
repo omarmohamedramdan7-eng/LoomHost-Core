@@ -7,6 +7,7 @@
 import React, { useState } from "react";
 import { Activity, ShieldCheck, Zap, ToggleLeft, ArrowRightLeft, RefreshCw, CheckCircle, Wifi, Compass } from "lucide-react";
 import { HostedSite } from "../types";
+import { useUser } from "../clerk-bridge";
 
 interface UptimeMonitorPanelProps {
   hostedSites: HostedSite[];
@@ -19,10 +20,18 @@ export const UptimeMonitorPanel: React.FC<UptimeMonitorPanelProps> = ({
   onRefreshSites,
   triggerToast
 }) => {
+  const { isSignedIn } = useUser();
   const [testingId, setTestingId] = useState<string | null>(null);
   const [isRefreshing, setIsRefreshing] = useState<boolean>(false);
 
   const handleTestPing = async (siteId: string) => {
+    if (!isSignedIn) {
+      if (typeof window !== "undefined") {
+        window.dispatchEvent(new Event("open-clerk-signin"));
+      }
+      triggerToast("🔐 يرجى تسجيل الدخول أولاً لإجراء اختبارات الاتصال بالسيرفر.", "info");
+      return;
+    }
     setTestingId(siteId);
     try {
       const response = await fetch("/api/automation/ping-site", {
@@ -53,6 +62,13 @@ export const UptimeMonitorPanel: React.FC<UptimeMonitorPanelProps> = ({
   };
 
   const handleManualRefresh = async () => {
+    if (!isSignedIn) {
+      if (typeof window !== "undefined") {
+        window.dispatchEvent(new Event("open-clerk-signin"));
+      }
+      triggerToast("🔐 يرجى تسجيل الدخول أولاً لتحديث الحالات الحية للخوادم.", "info");
+      return;
+    }
     setIsRefreshing(true);
     try {
       await onRefreshSites();

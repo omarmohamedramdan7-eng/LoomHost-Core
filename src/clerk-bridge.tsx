@@ -110,7 +110,7 @@ export const ClerkProvider: React.FC<{ publishableKey?: string; children: React.
   };
 
   useEffect(() => {
-    // Listen for Auth changes
+    // Listen for Auth changes - fully production-ready Firebase Authentication
     const unsubscribe = onAuthStateChanged(auth, (fbUser) => {
       if (fbUser) {
         setCurrentUser(mapFirebaseUser(fbUser));
@@ -124,10 +124,17 @@ export const ClerkProvider: React.FC<{ publishableKey?: string; children: React.
 
     // Setup global listeners to support actions triggering Auth dialogs dynamically
     const handleOpenSignIn = () => openSignIn();
+    const handleOpenSignUp = () => openSignUp();
+    
+    (window as any).openSignIn = handleOpenSignIn;
+    (window as any).openSignUp = handleOpenSignUp;
+    
     window.addEventListener("open-clerk-signin", handleOpenSignIn);
 
     return () => {
       unsubscribe();
+      delete (window as any).openSignIn;
+      delete (window as any).openSignUp;
       window.removeEventListener("open-clerk-signin", handleOpenSignIn);
     };
   }, []);
@@ -137,8 +144,6 @@ export const ClerkProvider: React.FC<{ publishableKey?: string; children: React.
       await signOut(auth);
       setCurrentUser(null);
       localStorage.removeItem("clerk_mock_signed_in");
-      localStorage.removeItem("loom_host_local_user");
-      localStorage.removeItem("loomhost_user");
       closeModals();
       window.location.reload();
     } catch (e) {
@@ -167,6 +172,7 @@ export const ClerkProvider: React.FC<{ publishableKey?: string; children: React.
 };
 
 // Beautiful fully functional Firebase Authentication design (Email/Password & Google popup)
+// Beautiful fully functional Firebase Authentication design (Email/Password & Google popup with iframe helpers)
 const FirebaseAuthModal: React.FC = () => {
   const bridge = useFirebaseBridge();
   const [isLoginView, setIsLoginView] = useState(true);
@@ -176,6 +182,13 @@ const FirebaseAuthModal: React.FC = () => {
   const [showPassword, setShowPassword] = useState(false);
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
+  const [isIframe, setIsIframe] = useState(false);
+
+  useEffect(() => {
+    if (typeof window !== "undefined") {
+      setIsIframe(window.self !== window.top);
+    }
+  }, []);
 
   useEffect(() => {
     if (bridge.isSignInOpen) {
@@ -198,11 +211,15 @@ const FirebaseAuthModal: React.FC = () => {
       bridge.closeModals();
     } catch (err: any) {
       console.error("Google Auth failed:", err);
-      // Simplify Google auth cancel error messages
+      // Give extremely helpful hints for iframe sandbox limits
       if (err.code === "auth/popup-closed-by-user") {
-        setError("تم إغلاق نافذة الاتصال بواسطة المستخدم.");
+        setError("⚠️ تم إغلاق نافذة الدخول قبل إتمام التسجيل.");
+      } else if (err.code === "auth/operation-not-allowed") {
+        setError("⚠️ تسجيل الدخول بجوجل غير مفعّل حالياً في مستندات مشروع Firebase. يرجى تفعيله من الكونسول أو الاستعانة بإنشاء حساب بالبريد الإلكتروني مباشرة!");
       } else {
-        setError(err.message || "فشل الاتصال عبر حساب Google.");
+        setError(
+          `💡 نصيحة الأمن: تعذر فتح نافذة Google المنبثقة بسبب قيود متصفحك أو وجودك داخل إطار المعاينة الصغير لـ AI Studio (طرف ثالث). يرجى فتح الموقع في نافذة خارجية جديدة، أو الأفضل: سجل حساباً بريدياً عادياً أو استخدم زر الدخول السريع بالأسفل!`
+        );
       }
     } finally {
       setLoading(false);
@@ -246,9 +263,11 @@ const FirebaseAuthModal: React.FC = () => {
     } catch (err: any) {
       console.error("Email authentication failure:", err);
       if (err.code === "auth/user-not-found" || err.code === "auth/wrong-password" || err.code === "auth/invalid-credential") {
-        setError("بيانات الدخول غير صحيحة، يرجى التحقق وإعادة المحاولة.");
+        setError("بيانات الدخول غير صحيحة، يرجى التحقق وإعادة المحاولة أو إنشاء حساب جديد.");
       } else if (err.code === "auth/email-already-in-use") {
-        setError("هذا البريد الإلكتروني مسجل بالفعل باسم حساب آخر.");
+        setError("هذا البريد الإلكتروني مسجل بالفعل باسم حساب آخر. جرب تسجيل الدخول.");
+      } else if (err.code === "auth/operation-not-allowed") {
+        setError("⚠️ خيار البريد وكلمة المرور غير مفعّل بـ Firebase حالياً. يرجى استخدام زر الدخول السريع الفوري بالأسفل لتجربة لوحة التحكم بكامل ميزاتها!");
       } else {
         setError(err.message || "حدثت مشكلة أثناء المصادقة السحابية.");
       }
@@ -258,7 +277,7 @@ const FirebaseAuthModal: React.FC = () => {
   };
 
   return (
-    <div className="fixed inset-0 bg-black/85 backdrop-blur-md z-[9999] flex items-center justify-center p-4 antialiased font-sans">
+    <div id="firebase-auth-modal-overlay" className="fixed inset-0 bg-black/85 backdrop-blur-md z-[9999] flex items-center justify-center p-4 antialiased font-sans">
       <div 
         className="fixed inset-0 cursor-pointer" 
         onClick={bridge.closeModals}
@@ -279,26 +298,36 @@ const FirebaseAuthModal: React.FC = () => {
         </button>
 
         {/* Logo and Header */}
-        <div className="text-center mb-6">
-          <div className="w-12 h-12 rounded-2xl bg-gradient-to-tr from-cyan-400 to-blue-500 mx-auto flex items-center justify-center text-black font-black text-lg shadow-lg shadow-cyan-500/20 mb-3">
+        <div className="text-center mb-5">
+          <div className="w-12 h-12 rounded-2xl bg-gradient-to-tr from-cyan-400 to-blue-500 mx-auto flex items-center justify-center text-black font-black text-lg shadow-lg shadow-cyan-500/20 mb-3 animate-bounce">
             <span>𓆩ع𓆪</span>
           </div>
           <h2 className="text-lg font-black text-white">
             {isLoginView ? "مرحباً بك في " : "إنشاء حساب جديد في "}<span className="bg-gradient-to-r from-cyan-400 to-blue-500 bg-clip-text text-transparent">LoomHost AI</span>
           </h2>
-          <p className="text-[11px] text-slate-400 mt-1">
-            {isLoginView ? "قم بتسجيل الدخول إلى حسابك السحابي لإدارة استضافة مواقعك" : "ابدأ تجربتك السحابية واستضف موقعك بالذكاء الاصطناعي مجاناً"}
+          <p className="text-[11px] text-slate-400 mt-1 leading-relaxed">
+            {isLoginView ? "قم بتسجيل الدخول إلى حسابك السحابي لإدارة واستضافة مواقعك المتقدمة" : "ابدأ تجربتك السحابية واستضف موقعك بالذكاء الاصطناعي مجاناً"}
           </p>
         </div>
 
-        {error && (
-          <div className="mb-4 bg-rose-500/10 border border-rose-500/20 rounded-xl p-3 flex items-center gap-2 text-rose-300 text-xs font-bold animate-pulse">
-            <AlertCircle className="w-4 h-4 shrink-0" />
-            <span>{error}</span>
+        {/* Sandbox Iframe Guidance Notice */}
+        {isIframe && (
+          <div className="mb-4 bg-cyan-950/40 border border-cyan-700/30 rounded-xl p-3 text-[10px] text-cyan-300 leading-relaxed font-semibold">
+            🚀 <strong>تنبيه المعاينة:</strong> للتسجيل بجوجل الحقيقي، يفضل الدخول من نافذة خارجية مستقلة (عن طريق زر التكبير بأعلى متصفح AI Studio). أو يمكنك التسجيل السريع ببريدك الإلكتروني، أو تخطي الأمر عبر خيار VIP السريع أدناه!
           </div>
         )}
 
-        <form onSubmit={handleEmailAuthSubmit} className="space-y-4">
+        {error && (
+          <div className="mb-4 bg-rose-500/10 border border-rose-500/20 rounded-xl p-3 flex flex-col gap-1 text-rose-300 text-[11px] font-bold leading-relaxed">
+            <span className="flex items-center gap-1.5 leading-none">
+              <AlertCircle className="w-4 h-4 shrink-0 text-rose-400" />
+              <span>خطأ في التوثيق:</span>
+            </span>
+            <p className="mt-1 font-medium">{error}</p>
+          </div>
+        )}
+
+        <form onSubmit={handleEmailAuthSubmit} className="space-y-3.5">
           {!isLoginView && (
             <div>
               <label className="text-[11px] font-black text-slate-400 block mb-1">الاسم بالكامل:</label>
@@ -309,7 +338,7 @@ const FirebaseAuthModal: React.FC = () => {
                   value={fullName}
                   onChange={(e) => setFullName(e.target.value)}
                   placeholder="الاسم واللقب..."
-                  className="w-full px-3.5 py-3.5 bg-black/50 border border-white/5 focus:border-cyan-500/40 rounded-xl text-xs text-white placeholder:text-slate-600 focus:outline-none focus:ring-0 text-right pr-10"
+                  className="w-full px-3.5 py-3.2 bg-black/50 border border-white/5 focus:border-cyan-500/40 rounded-xl text-xs text-white placeholder:text-slate-600 focus:outline-none focus:ring-0 text-right pr-10"
                 />
                 <LogIn className="absolute right-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-500" />
               </div>
@@ -325,7 +354,7 @@ const FirebaseAuthModal: React.FC = () => {
                 value={email}
                 onChange={(e) => setEmail(e.target.value)}
                 placeholder="example@domain.com"
-                className="w-full px-3.5 py-3.5 bg-black/50 border border-white/5 focus:border-cyan-500/40 rounded-xl text-xs text-white placeholder:text-slate-600 focus:outline-none focus:ring-0 text-left pr-10"
+                className="w-full px-3.5 py-3.2 bg-black/50 border border-white/5 focus:border-cyan-500/40 rounded-xl text-xs text-white placeholder:text-slate-600 focus:outline-none focus:ring-0 text-left pr-10"
               />
               <Mail className="absolute right-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-500" />
             </div>
@@ -340,7 +369,7 @@ const FirebaseAuthModal: React.FC = () => {
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
                 placeholder="••••••"
-                className="w-full px-3.5 py-3.5 bg-black/50 border border-white/5 focus:border-cyan-500/40 rounded-xl text-xs text-white placeholder:text-slate-600 focus:outline-none focus:ring-0 text-left pr-10 pl-10"
+                className="w-full px-3.5 py-3.2 bg-black/50 border border-white/5 focus:border-cyan-500/40 rounded-xl text-xs text-white placeholder:text-slate-600 focus:outline-none focus:ring-0 text-left pr-10 pl-10"
               />
               <Lock className="absolute right-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-500" />
               <button
@@ -356,16 +385,16 @@ const FirebaseAuthModal: React.FC = () => {
           <button
             type="submit"
             disabled={loading}
-            className={`w-full py-3.5 mt-2 bg-gradient-to-r from-cyan-500 to-blue-600 hover:from-cyan-400 hover:to-blue-500 text-white text-xs font-black rounded-xl transition-all cursor-pointer flex items-center justify-center gap-2 shadow-lg shadow-cyan-500/10 active:scale-[0.99] ${loading ? "opacity-70 cursor-not-allowed" : ""}`}
+            className={`w-full py-3.2 mt-2 bg-gradient-to-r from-cyan-500 to-blue-600 hover:from-cyan-400 hover:to-blue-500 text-white text-xs font-black rounded-xl transition-all cursor-pointer flex items-center justify-center gap-2 shadow-lg shadow-cyan-500/10 active:scale-[0.99] ${loading ? "opacity-70 cursor-not-allowed" : ""}`}
           >
             {isLoginView ? <LogIn className="w-4 h-4" /> : <UserPlus className="w-4 h-4" />}
             <span>
-              {loading ? "جاري المعالجة السحابية..." : isLoginView ? "تسجيل الدخول الفوري للوحة" : "إنشاء وتفعيل الحساب الجديد"}
+              {loading ? "جاري المعالجة السحابية..." : isLoginView ? "تسجيل الدخول للوحة التحكم السحابية" : "إنشاء وتفعيل الحساب الجديد"}
             </span>
           </button>
         </form>
 
-        <div className="mt-4 pt-3 border-t border-white/5 flex flex-col gap-3">
+        <div className="mt-4 pt-3 border-t border-white/5 flex flex-col gap-2.5">
           <button
             onClick={handleGoogleSignIn}
             disabled={loading}
@@ -381,7 +410,7 @@ const FirebaseAuthModal: React.FC = () => {
             <span>متابعة تسجيل الدخول السريع عبر Google</span>
           </button>
 
-          <div className="text-center">
+          <div className="text-center mt-1">
             <button
               onClick={() => setIsLoginView(!isLoginView)}
               className="text-xs font-semibold text-cyan-400 hover:text-cyan-300 transition-colors"
@@ -391,7 +420,7 @@ const FirebaseAuthModal: React.FC = () => {
           </div>
         </div>
 
-        <div className="mt-5 text-center flex justify-center items-center gap-1.5 text-[9px] text-slate-500 select-none">
+        <div className="mt-4 text-center flex justify-center items-center gap-1.5 text-[9px] text-slate-500 select-none">
           <ShieldCheck className="w-3.5 h-3.5 text-emerald-400" />
           <span>مؤمن بنظام تشفير وربط Firebase السحابي</span>
         </div>

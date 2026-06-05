@@ -39,7 +39,8 @@ import {
   FileText,
   Mail,
   MessageSquare,
-  User
+  User,
+  LogOut
 } from "lucide-react";
 import { ProjectCommentsSection } from "./components/ProjectCommentsSection";
 
@@ -52,9 +53,8 @@ import { ToastNotification, Toast } from "./components/ToastNotification";
 import { ImageToCodePanel } from "./components/ImageToCodePanel";
 import { SeoOptimizerPanel } from "./components/SeoOptimizerPanel";
 import { UptimeMonitorPanel } from "./components/UptimeMonitorPanel";
-import { AuthButton } from "./components/AuthButton";
 import { CloudProjectsPanel } from "./components/CloudProjectsPanel";
-import { SignedIn, SignedOut, SignInButton, UserButton, useUser, isClerkConfigured } from "./clerk-bridge";
+import { SignedIn, SignedOut, SignInButton, UserButton, useUser, isClerkConfigured, useFirebaseBridge } from "./clerk-bridge";
 import { GeminiStreamGenerator } from "./components/GeminiStreamGenerator";
 import { GlobalGatewayHub } from "./components/GlobalGatewayHub";
 
@@ -92,53 +92,12 @@ export default function App() {
 
   const [isAutomationDeckOpen, setIsAutomationDeckOpen] = useState<boolean>(true);
 
-  // Local User Profile Generator for immediate, lag-free Vercel and serverless deployments
-  const getOrCreateUser = (): LocalUserProfile => {
-    const saved = localStorage.getItem("loom_host_local_user") || localStorage.getItem("loomhost_user");
-    if (saved) {
-      try {
-        const parsed = JSON.parse(saved);
-        if (parsed.id || parsed.uid) {
-          return {
-            uid: parsed.uid || parsed.id,
-            id: parsed.id || parsed.uid,
-            name: parsed.name || parsed.displayName || "Guest",
-            displayName: parsed.displayName || parsed.name || "Guest",
-            email: parsed.email || "guest@loomhost.ai",
-            photoURL: parsed.photoURL || "https://lh3.googleusercontent.com/a/default-user=s96-c",
-            isPremium: parsed.isPremium !== undefined ? !!parsed.isPremium : false,
-            subscriptionPlan: parsed.subscriptionPlan || (parsed.isPremium ? "Premium Pro Plan" : "Free Plan"),
-            createdAt: parsed.createdAt || new Date().toISOString()
-          };
-        }
-      } catch (e) {
-        console.error("Failed parsing local user schema:", e);
-      }
-    }
-
-    // Generate robust default Profile: Guest, isPremium: false
-    const randomId = "usr_" + Math.random().toString(36).substring(2, 10);
-    const guestUser: LocalUserProfile = {
-      uid: randomId,
-      id: randomId,
-      name: "Guest",
-      displayName: "Guest",
-      email: "guest@loomhost.ai",
-      photoURL: "https://lh3.googleusercontent.com/a/default-user=s96-c",
-      isPremium: false,
-      subscriptionPlan: "Free Plan",
-      createdAt: new Date().toISOString()
-    };
-    localStorage.setItem("loom_host_local_user", JSON.stringify(guestUser));
-    localStorage.setItem("loomhost_user", JSON.stringify(guestUser));
-    return guestUser;
-  };
-
   // Synchronously initialize state with zero startup delay
-  const [currentUser, setCurrentUser] = useState<LocalUserProfile>(getOrCreateUser);
+  const [currentUser, setCurrentUser] = useState<LocalUserProfile | null>(null);
 
   // Clerk state bridge for automatic profile synchronization
   const { isLoaded, isSignedIn, user } = useUser();
+  const { triggerSignOut } = useFirebaseBridge();
 
   useEffect(() => {
     if (isLoaded && isSignedIn && user) {
@@ -154,13 +113,74 @@ export default function App() {
         createdAt: user.createdAt ? new Date(user.createdAt).toISOString() : new Date().toISOString()
       };
       setCurrentUser(clerkUser);
-      localStorage.setItem("loom_host_local_user", JSON.stringify(clerkUser));
-      localStorage.setItem("loomhost_user", JSON.stringify(clerkUser));
     } else if (isLoaded && !isSignedIn) {
-      const local = getOrCreateUser();
-      setCurrentUser(local);
+      setCurrentUser(null);
     }
   }, [isLoaded, isSignedIn, user]);
+
+  // Global interaction guard for unsigned-in guests to browse but force login on action
+  useEffect(() => {
+    if (isSignedIn || !isLoaded) return;
+
+    const handleGlobalClick = (e: MouseEvent) => {
+      const target = e.target as HTMLElement;
+      if (!target) return;
+
+      // 1. Allow switching tabs
+      const isTabHeader = target.closest("[id^='tab-']") || target.closest(".tab-nav-btn") || target.closest("[role='tab']");
+      if (isTabHeader) return;
+
+      // 1.5 Allow any interaction inside the firebase auth modal itself
+      if (target.closest("#firebase-auth-modal-overlay")) return;
+
+      // 2. Allow using/clicking authentication elements (clerk triggers, login button, direct logout button, etc.)
+      const isAuthBtn = target.closest("#clerk-auth-container") || 
+                        target.closest("#btn-direct-login") || 
+                        target.closest(".clerk-user-button") || 
+                        target.closest(".clerk-root") || 
+                        target.closest("button.clerk-trigger") || 
+                        target.closest(".clerk-sign-in-btn") ||
+                        target.closest(".clerk-credential-trigger") ||
+                        target.closest("[data-clerk-element]") ||
+                        (target.textContent && (
+                          target.textContent.includes("الدخول") || 
+                          target.textContent.includes("تسجيل") || 
+                          target.textContent.includes("حساب")
+                        ));
+      if (isAuthBtn) return;
+
+      // 3. Allow closing toasts or notifications so guests can clear alerts
+      const isToastClose = target.closest(".toast-close-btn") || target.closest("#toast-container") || target.closest(".toast-notification");
+      if (isToastClose) return;
+
+      // 4. Capture any click on interactive inputs, buttons, textarea, links, selects, comment submission, like button, file input triggers, preset clicks, etc.
+      const isInteractive = target.closest("button") || 
+                            target.closest("input") || 
+                            target.closest("textarea") || 
+                            target.closest("select") || 
+                            target.closest("a") || 
+                            target.closest("[role='button']") ||
+                            target.closest(".clickable-card") ||
+                            target.closest(".interactive-element");
+
+      if (isInteractive) {
+        // Enforce user sign-in immediately
+        e.preventDefault();
+        e.stopPropagation();
+        
+        if (typeof window !== "undefined") {
+          window.dispatchEvent(new Event("open-clerk-signin"));
+        }
+        
+        triggerToast("🔐 يرجى تسجيل الدخول أولاً للبدء في استخدام وبرمجة المواقع والاستفادة من خدمات LoomHost AI.", "info");
+      }
+    };
+
+    document.addEventListener("click", handleGlobalClick, true); // capture phase
+    return () => {
+      document.removeEventListener("click", handleGlobalClick, true);
+    };
+  }, [isSignedIn, isLoaded]);
 
   // Protect actions and switch tabs if signed out by prompting the Clerk login modal
   const handleProtectedAction = useCallback((onSuccess: () => void, message?: string) => {
@@ -177,18 +197,8 @@ export default function App() {
   }, [isSignedIn]);
 
   const setActiveTab = useCallback((tab: ActiveTab) => {
-    if (tab === "generator" || tab === "editor" || tab === "deployments" || (tab as string) === "profile") {
-      handleProtectedAction(() => {
-        _setActiveTab(tab);
-      }, `يرجى تسجيل الدخول أولاً للوصول إلى ${
-        tab === "generator" ? "أداة توليد الذكاء الاصطناعي" :
-        tab === "editor" ? "محرر الأكواد الذكي" :
-        tab === "deployments" ? "إدارة الاستضافات المباشرة" : "الملف الشخصي"
-      }`);
-    } else {
-      _setActiveTab(tab);
-    }
-  }, [handleProtectedAction]);
+    _setActiveTab(tab);
+  }, []);
 
   const [userProjects, setUserProjects] = useState<UserProjectData[]>([]);
   const [loadingProjects, setLoadingProjects] = useState<boolean>(false);
@@ -247,7 +257,10 @@ export default function App() {
   };
 
   const handleSaveProjectToCloud = async () => {
-    if (!currentUser) {
+    if (!isSignedIn) {
+      if (typeof window !== "undefined") {
+        window.dispatchEvent(new Event("open-clerk-signin"));
+      }
       triggerToast("🔐 يرجى تسجيل الدخول أولاً لتتمكن من حفظ تصاميمك سحابياً.", "info");
       return;
     }
@@ -314,7 +327,13 @@ export default function App() {
   };
 
   const handleDeleteProjectCloud = async (projectId: string) => {
-    if (!currentUser) return;
+    if (!isSignedIn) {
+      if (typeof window !== "undefined") {
+        window.dispatchEvent(new Event("open-clerk-signin"));
+      }
+      triggerToast("🔐 يرجى تسجيل الدخول أولاً لإجراء العمليات السحابية.", "info");
+      return;
+    }
     try {
       await deleteProjectFromFirestore(currentUser.uid, projectId);
       if (activeProjectId === projectId) {
@@ -328,7 +347,10 @@ export default function App() {
   };
 
   const handleToggleProjectPrivacyCloud = async (projectId: string, isPublic: boolean) => {
-    if (!currentUser) {
+    if (!isSignedIn) {
+      if (typeof window !== "undefined") {
+        window.dispatchEvent(new Event("open-clerk-signin"));
+      }
       triggerToast("🔐 يرجى تسجيل الدخول لإعداد خصوصية التصميم.", "info");
       return;
     }
@@ -371,7 +393,10 @@ export default function App() {
   };
 
   const handleLikeProjectCloud = async (projectId: string, originalOwnerId: string) => {
-    if (!currentUser) {
+    if (!isSignedIn) {
+      if (typeof window !== "undefined") {
+        window.dispatchEvent(new Event("open-clerk-signin"));
+      }
       triggerToast("🔐 يرجى تسجيل الدخول أولاً للإعجاب بالمشاريع وتفعيل روح التفاعل والتنافس!", "info");
       return;
     }
@@ -410,7 +435,13 @@ export default function App() {
   };
 
   const handlePublishProjectCloud = async (project: UserProjectData) => {
-    if (!currentUser) return;
+    if (!isSignedIn) {
+      if (typeof window !== "undefined") {
+        window.dispatchEvent(new Event("open-clerk-signin"));
+      }
+      triggerToast("🔐 يرجى تسجيل الدخول أولاً لتتمكن من نشر وتفعيل الاستضافة.", "info");
+      return;
+    }
     setPublishingProjectId(project.projectId);
     try {
       // 1. Call Deploy Site to publish it on back-end memory
@@ -705,16 +736,6 @@ document.getElementById('alert-trigger')?.addEventListener('click', () => {
   const iframeRef = useRef<HTMLIFrameElement | null>(null);
 
   const handleTabChange = (tab: ActiveTab) => {
-    if (tab !== "studio" && tab !== "community") {
-      if (!isSignedIn) {
-        if (typeof window !== "undefined") {
-          window.dispatchEvent(new Event("open-clerk-signin"));
-        } else {
-          alert("يرجى تسجيل الدخول السريع أولاً لتنفيذ هذا الإجراء والبدء في برمجة واستضافة مشاريعك.");
-        }
-        return;
-      }
-    }
     setActiveTab(tab);
   };
 
@@ -1237,6 +1258,13 @@ document.getElementById('alert-trigger')?.addEventListener('click', () => {
 
   // Deploy / Host the current state
   const handleDeployCurrentSite = async () => {
+    if (!isSignedIn) {
+      if (typeof window !== "undefined") {
+        window.dispatchEvent(new Event("open-clerk-signin"));
+      }
+      triggerToast("🔐 يرجى تسجيل الدخول أولاً لتتمكن من استضافة ونشر تطبيقك.", "info");
+      return;
+    }
     setIsDeploying(true);
     try {
       const response = await fetch("/api/deploy-site", {
@@ -1274,6 +1302,13 @@ document.getElementById('alert-trigger')?.addEventListener('click', () => {
 
   // Upload raw contents handler
   const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+    if (!isSignedIn) {
+      if (typeof window !== "undefined") {
+        window.dispatchEvent(new Event("open-clerk-signin"));
+      }
+      triggerToast("🔐 يرجى تسجيل الدخول أولاً لرفع ملفاتك البرمجية.", "info");
+      return;
+    }
     const files = e.target.files;
     if (!files || files.length === 0) return;
 
@@ -1379,6 +1414,13 @@ document.getElementById('alert-trigger')?.addEventListener('click', () => {
 
   // Handle AI Refinement of existing hosted site
   const handleRefineSite = async () => {
+    if (!isSignedIn) {
+      if (typeof window !== "undefined") {
+        window.dispatchEvent(new Event("open-clerk-signin"));
+      }
+      triggerToast("🔐 يرجى تسجيل الدخول أولاً لتعديل الموقع بالذكاء الاصطناعي.", "info");
+      return;
+    }
     if (!refinementSiteId || !refinementInstructions.trim()) return;
     setIsRefining(true);
     setRefinementError(null);
@@ -1427,6 +1469,13 @@ document.getElementById('alert-trigger')?.addEventListener('click', () => {
   };
 
   const handleDownloadGithubPackage = async () => {
+    if (!isSignedIn) {
+      if (typeof window !== "undefined") {
+        window.dispatchEvent(new Event("open-clerk-signin"));
+      }
+      triggerToast("🔐 يرجى تسجيل الدخول أولاً لتتمكن من تنزيل حزمة الأكواد البرمجية الخاصة بالمشروع.", "info");
+      return;
+    }
     setIsCreatingZip(true);
     try {
       const zip = new JSZip();
@@ -1684,15 +1733,17 @@ ${jsCode}
                 <div id="clerk-signedin-wrapper" className="bg-slate-950/80 border border-slate-800 rounded-xl px-2.5 py-1.5 flex items-center gap-2">
                   <span className="text-[10px] text-slate-400 font-bold hidden md:inline select-none">لوحة التحكم النشطة</span>
                   <UserButton afterSignOutUrl="/" />
+                  <button 
+                    id="btn-direct-logout"
+                    onClick={() => triggerSignOut()}
+                    className="cursor-pointer bg-rose-500/10 hover:bg-rose-500/20 text-rose-400 hover:text-rose-300 border border-rose-500/20 px-2.5 py-1.5 rounded-lg text-[11px] font-extrabold flex items-center gap-1 transition-all hover:scale-[1.02] active:scale-[0.98]"
+                    title="تسجيل الخروج السريع من المنصة"
+                  >
+                    <LogOut className="w-3.5 h-3.5" />
+                    <span className="hidden sm:inline">تسجيل الخروج</span>
+                  </button>
                 </div>
               </SignedIn>
-
-              <AuthButton 
-                currentUser={currentUser}
-                setCurrentUser={setCurrentUser}
-                triggerToast={triggerToast}
-                initiatePayment={initiatePayment}
-              />
             </div>
           </div>
         </div>
@@ -2508,6 +2559,14 @@ ${jsCode}
                     <textarea
                       value={htmlCode}
                       onChange={(e) => setHtmlCode(e.target.value)}
+                      onFocus={() => {
+                        if (!isSignedIn) {
+                          if (typeof window !== "undefined") {
+                            window.dispatchEvent(new Event("open-clerk-signin"));
+                          }
+                          triggerToast("🔐 يرجى تسجيل الدخول أولاً كشرط للمبرمج للتعديل على الأكواد بشكل تفاعلي.", "info");
+                        }
+                      }}
                       rows={8}
                       className="w-full bg-[#040810] border border-blue-950 focus:border-orange-500 rounded-lg p-2.5 font-mono text-xs text-orange-200 focus:outline-none placeholder-slate-700 leading-relaxed text-left"
                     />
@@ -2523,6 +2582,14 @@ ${jsCode}
                     <textarea
                       value={cssCode}
                       onChange={(e) => setCssCode(e.target.value)}
+                      onFocus={() => {
+                        if (!isSignedIn) {
+                          if (typeof window !== "undefined") {
+                            window.dispatchEvent(new Event("open-clerk-signin"));
+                          }
+                          triggerToast("🔐 يرجى تسجيل الدخول أولاً كشرط للمبرمج للتعديل على الأكواد بشكل تفاعلي.", "info");
+                        }
+                      }}
                       rows={8}
                       className="w-full bg-[#040810] border border-blue-950 focus:border-sky-500 rounded-lg p-2.5 font-mono text-xs text-sky-200 focus:outline-none placeholder-slate-700 leading-relaxed text-left"
                     />
@@ -2538,6 +2605,14 @@ ${jsCode}
                     <textarea
                       value={jsCode}
                       onChange={(e) => setJsCode(e.target.value)}
+                      onFocus={() => {
+                        if (!isSignedIn) {
+                          if (typeof window !== "undefined") {
+                            window.dispatchEvent(new Event("open-clerk-signin"));
+                          }
+                          triggerToast("🔐 يرجى تسجيل الدخول أولاً كشرط للمبرمج للتعديل على الأكواد بشكل تفاعلي.", "info");
+                        }
+                      }}
                       rows={6}
                       className="w-full bg-[#040810] border border-blue-950 focus:border-yellow-500 rounded-lg p-2.5 font-mono text-xs text-yellow-100 focus:outline-none placeholder-slate-700 leading-relaxed text-left"
                     />
