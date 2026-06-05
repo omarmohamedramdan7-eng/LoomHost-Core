@@ -78,7 +78,7 @@ type ActiveTab = "studio" | "generator" | "editor" | "deployments" | "community"
 export default function App() {
 
   // Navigation
-  const [activeTab, setActiveTab] = useState<ActiveTab>("studio");
+  const [activeTab, _setActiveTab] = useState<ActiveTab>("studio");
 
   // Custom Toast State
   const [toasts, setToasts] = useState<Toast[]>([]);
@@ -161,6 +161,34 @@ export default function App() {
       setCurrentUser(local);
     }
   }, [isLoaded, isSignedIn, user]);
+
+  // Protect actions and switch tabs if signed out by prompting the Clerk login modal
+  const handleProtectedAction = useCallback((onSuccess: () => void, message?: string) => {
+    if (!isSignedIn) {
+      if (typeof window !== "undefined") {
+        window.dispatchEvent(new Event("open-clerk-signin"));
+      } else {
+        alert(message || "يرجى تسجيل الدخول أولاً لتنفيذ هذا الإجراء.");
+      }
+      return false;
+    }
+    onSuccess();
+    return true;
+  }, [isSignedIn]);
+
+  const setActiveTab = useCallback((tab: ActiveTab) => {
+    if (tab === "generator" || tab === "editor" || tab === "deployments" || (tab as string) === "profile") {
+      handleProtectedAction(() => {
+        _setActiveTab(tab);
+      }, `يرجى تسجيل الدخول أولاً للوصول إلى ${
+        tab === "generator" ? "أداة توليد الذكاء الاصطناعي" :
+        tab === "editor" ? "محرر الأكواد الذكي" :
+        tab === "deployments" ? "إدارة الاستضافات المباشرة" : "الملف الشخصي"
+      }`);
+    } else {
+      _setActiveTab(tab);
+    }
+  }, [handleProtectedAction]);
 
   const [userProjects, setUserProjects] = useState<UserProjectData[]>([]);
   const [loadingProjects, setLoadingProjects] = useState<boolean>(false);
@@ -1796,7 +1824,9 @@ ${jsCode}
                   </button>
                   <button
                     onClick={() => {
-                      setShowUploadModal(true);
+                      handleProtectedAction(() => {
+                        setShowUploadModal(true);
+                      }, "يرجى تسجيل الدخول أولاً لرفع ملفات الأكواد الخاصة بك واستضافتها.");
                     }}
                     className="px-5 py-2.5 bg-neutral-900 hover:bg-neutral-800 text-white font-semibold text-sm rounded-xl border border-white/10 transition duration-150"
                   >
@@ -1864,8 +1894,10 @@ ${jsCode}
                     <div 
                       key={tmpl.id}
                       onClick={() => {
-                        loadPresetTemplate(tmpl);
-                        setActiveTab("editor");
+                        handleProtectedAction(() => {
+                          loadPresetTemplate(tmpl);
+                          setActiveTab("editor");
+                        }, "يرجى تسجيل الدخول أولاً لتثبيت قالب الموقع والبدء في تعديله.");
                       }}
                       className="group p-4 bg-[#0a1222]/80 border border-blue-900/20 rounded-xl hover:border-cyan-500/40 cursor-pointer transition-all duration-150 hover:-translate-y-0.5"
                     >

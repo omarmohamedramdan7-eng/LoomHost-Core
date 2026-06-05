@@ -53,6 +53,27 @@ function getGeminiClient() {
 }
 
 /**
+ * Executes a content generation with automatic model fallback of @google/genai
+ */
+async function generateContentWithFallback(ai, params, fallbackModels = ["gemini-3.1-pro-preview", "gemini-3.1-flash-lite"]) {
+  const modelsToTry = [params.model, ...fallbackModels.filter(m => m !== params.model)];
+  let lastError = null;
+  
+  for (const modelName of modelsToTry) {
+    try {
+      console.log(`[Gemini Converter Resilience] Attempting generation with model: ${modelName}`);
+      const updatedParams = { ...params, model: modelName };
+      const response = await ai.models.generateContent(updatedParams);
+      return response;
+    } catch (err) {
+      lastError = err;
+      console.warn(`[Gemini Converter Fallback Warning] Model ${modelName} failed/overloaded. Error: ${err?.message || err}.`);
+    }
+  }
+  throw lastError || new Error("All fallback models exhausted and failed.");
+}
+
+/**
  * @route POST /api/image-to-code
  * @desc استقبال صورة، ومعالجتها بالذكاء الاصطناعي، ثم حفظها كـ index.html للمستخدم.
  * @access Public
@@ -88,8 +109,8 @@ imageConverterRouter.post("/api/image-to-code", upload.single("image"), async (r
 
     console.log(`[ImageConverter] بدء تحليل ومعالجة الصورة للمشروع: ${projectId} عبر Gemini 3.5 Flash...`);
 
-    // 4. استدعاء النموذج الفائق Gemini 3.5 Flash (النموذج الأفضل والأسرع لمثل هذه المهام العامة وتحليل الأكواد والواجهات)
-    const geminiResponse = await ai.models.generateContent({
+    // 4. استدعاء النموذج الفائق Gemini 3.5 Flash مع تفعيل الموثوقية التلقائية والتبديل عند الحاجة
+    const geminiResponse = await generateContentWithFallback(ai, {
       model: "gemini-3.5-flash",
       contents: { 
         parts: [imagePart, textPart] 

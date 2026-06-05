@@ -39,6 +39,22 @@ export const useSimulatedAuth = () => {
   return context;
 };
 
+const ClerkHelper = () => {
+  const clerk = RealClerk.useClerk();
+  useEffect(() => {
+    const handleOpenSignIn = () => {
+      try {
+        clerk.openSignIn();
+      } catch (e) {
+        console.error("Failed to open real Clerk sign in:", e);
+      }
+    };
+    window.addEventListener("open-clerk-signin", handleOpenSignIn);
+    return () => window.removeEventListener("open-clerk-signin", handleOpenSignIn);
+  }, [clerk]);
+  return null;
+};
+
 export const ClerkProvider: React.FC<{ publishableKey: string; children: React.ReactNode }> = ({
   publishableKey,
   children,
@@ -72,6 +88,12 @@ export const ClerkProvider: React.FC<{ publishableKey: string; children: React.R
       setIsSignUpOpen(true);
       setIsSignInOpen(false);
     };
+
+    const handleOpenSignIn = () => {
+      openSignIn();
+    };
+    window.addEventListener("open-clerk-signin", handleOpenSignIn);
+    return () => window.removeEventListener("open-clerk-signin", handleOpenSignIn);
   }, []);
   
   const openSignUp = () => {
@@ -120,6 +142,7 @@ export const ClerkProvider: React.FC<{ publishableKey: string; children: React.R
   if (isClerkConfigured()) {
     return (
       <RealClerk.ClerkProvider publishableKey={publishableKey}>
+        <ClerkHelper />
         {children}
       </RealClerk.ClerkProvider>
     );

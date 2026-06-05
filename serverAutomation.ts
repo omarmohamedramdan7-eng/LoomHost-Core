@@ -44,6 +44,35 @@ function getGeminiClient(): GoogleGenAI {
 }
 
 /**
+ * Executes a content generation with automatic model fallback of @google/genai
+ */
+async function generateContentWithFallback(
+  ai: GoogleGenAI,
+  params: {
+    model: string;
+    contents: any;
+    config?: any;
+  },
+  fallbackModels: string[] = ["gemini-3.1-pro-preview", "gemini-3.1-flash-lite"]
+): Promise<any> {
+  const modelsToTry = [params.model, ...fallbackModels.filter(m => m !== params.model)];
+  let lastError: any = null;
+  
+  for (const modelName of modelsToTry) {
+    try {
+      console.log(`[Gemini Automation Resilience] Attempting single generation with model: ${modelName}`);
+      const updatedParams = { ...params, model: modelName };
+      const response = await ai.models.generateContent(updatedParams);
+      return response;
+    } catch (err: any) {
+      lastError = err;
+      console.warn(`[Gemini Automation Fallback Warning] Non-stream Model ${modelName} failed/overloaded. Error: ${err?.message || err}.`);
+    }
+  }
+  throw lastError || new Error("All fallback models exhausted and failed.");
+}
+
+/**
  * FEATURE A: Image-to-Code Converter
  * POST /api/automation/image-to-code
  * Parses screenshot or design to clean semantic web code (HTML, CSS, JS) matching the app's standard editor context.
@@ -77,7 +106,7 @@ automationRouter.post("/api/automation/image-to-code", upload.single("image"), a
     console.log("[Automation Backend] Transforming uploaded image to code via Gemini 3.5 Flash...");
     
     // Call Gemini 3.5 Flash (Perfect Multimodal Capability)
-    const response = await ai.models.generateContent({
+    const response = await generateContentWithFallback(ai, {
       model: "gemini-3.5-flash",
       contents: {
         parts: [imagePart, { text: promptMessage }]
@@ -166,7 +195,7 @@ ${js || ""}`;
 
     console.log("[Automation Backend] Optimizing SEO with Gemini 3.5 Flash for site:", siteName);
 
-    const response = await ai.models.generateContent({
+    const response = await generateContentWithFallback(ai, {
       model: "gemini-3.5-flash",
       contents: seoPrompt,
       config: {

@@ -47,6 +47,64 @@ function getGeminiClient(): GoogleGenAI {
   return geminiClient;
 }
 
+/**
+ * Executes a streaming content generation with automatic model fallback of @google/genai
+ */
+async function generateContentStreamWithFallback(
+  ai: GoogleGenAI,
+  params: {
+    model: string;
+    contents: any;
+    config?: any;
+  },
+  fallbackModels: string[] = ["gemini-3.1-pro-preview", "gemini-3.1-flash-lite"]
+): Promise<any> {
+  const modelsToTry = [params.model, ...fallbackModels.filter(m => m !== params.model)];
+  let lastError: any = null;
+  
+  for (const modelName of modelsToTry) {
+    try {
+      console.log(`[Gemini Resilience] Attempting stream generation with model: ${modelName}`);
+      const updatedParams = { ...params, model: modelName };
+      const stream = await ai.models.generateContentStream(updatedParams);
+      return stream;
+    } catch (err: any) {
+      lastError = err;
+      console.warn(`[Gemini Fallback Warning] Streaming with model ${modelName} failed/overloaded. Error: ${err?.message || err}.`);
+    }
+  }
+  throw lastError || new Error("All streaming fallback models exhausted and failed.");
+}
+
+/**
+ * Executes a content generation with automatic model fallback of @google/genai
+ */
+async function generateContentWithFallback(
+  ai: GoogleGenAI,
+  params: {
+    model: string;
+    contents: any;
+    config?: any;
+  },
+  fallbackModels: string[] = ["gemini-3.1-pro-preview", "gemini-3.1-flash-lite"]
+): Promise<any> {
+  const modelsToTry = [params.model, ...fallbackModels.filter(m => m !== params.model)];
+  let lastError: any = null;
+  
+  for (const modelName of modelsToTry) {
+    try {
+      console.log(`[Gemini Resilience] Attempting single generation with model: ${modelName}`);
+      const updatedParams = { ...params, model: modelName };
+      const response = await ai.models.generateContent(updatedParams);
+      return response;
+    } catch (err: any) {
+      lastError = err;
+      console.warn(`[Gemini Fallback Warning] Non-stream Model ${modelName} failed/overloaded. Error: ${err?.message || err}.`);
+    }
+  }
+  throw lastError || new Error("All fallback models exhausted and failed.");
+}
+
 // In-Memory Host Storage for websites
 interface InMemSite {
   id: string;
@@ -660,7 +718,7 @@ ${styleDirective || "High elegance and premium design tone."}
 
 Please output the surgically modified codebase in Arabic alignment in the requested JSON structure. Keep existing classes and IDs unchanged unless they are target for the change.`;
 
-    const response = await ai.models.generateContent({
+    const response = await generateContentWithFallback(ai, {
       model: "gemini-3.5-flash",
       contents: requestPrompt,
       config: {
@@ -761,7 +819,7 @@ ${styleDirective || "حافظ على طابع الفخامة والأناقة و
 3. يجب أن تكون كافة الأزرار، والروابط، والنوافذ التفاعلية في الموقع معدة وجاهزة للعمل حقيقةً بالـ Javascript وليست مجرد نصوص جامدة.
 4. أخرج النتيجة في ذات الهيكل البرمجي لملف JSON لسهولة تحديث الاستضافة فوراً.`;
 
-    const response = await ai.models.generateContent({
+    const response = await generateContentWithFallback(ai, {
       model: "gemini-3.5-flash",
       contents: requestPrompt,
       config: {
@@ -1488,7 +1546,7 @@ ${styleDirective}
 
     const systemInstruction = `You are an elite, world-class UI/UX web designer and front-end developer specialized in creating high-converting, gorgeous, luxury paid-tier templates. You write pristine, production-ready, highly interactive HTML, fully customized and styled CSS grid/flex designs (integrated in Arabic/English depending on prompt) with magnificent visual animations, sleek glassmorphism/neon effects, and clean interactive JavaScript operations (interactive counters, forms, calculators or calculators with real dynamic JS feedback). Do not include raw head/body, only clean structural elements. ${customInstructionInjections}`;
 
-    const stream = await ai.models.generateContentStream({
+    const stream = await generateContentStreamWithFallback(ai, {
       model: activeModel,
       contents: requestPrompt,
       config: {
@@ -1616,7 +1674,7 @@ ${styleDirective}
 
     const systemInstruction = `You are an elite, world-class UI/UX web designer and front-end developer specialized in creating high-converting, gorgeous, luxury paid-tier templates. You write pristine, production-ready, highly interactive HTML, fully customized and styled CSS grid/flex designs (integrated in Arabic/English depending on prompt) with magnificent visual animations, sleek glassmorphism/neon effects, and clean interactive JavaScript operations (interactive counters, forms, calculators or calculators with real dynamic JS feedback). Do not include raw head/body, only clean structural elements. ${customInstructionInjections}`;
 
-    const response = await ai.models.generateContent({
+    const response = await generateContentWithFallback(ai, {
       model: activeModel,
       contents: requestPrompt,
       config: {
@@ -1715,7 +1773,7 @@ app.post("/api/clone-design", async (req, res) => {
       });
     }
 
-    const response = await ai.models.generateContent({
+    const response = await generateContentWithFallback(ai, {
       model: "gemini-3.5-flash",
       contents,
       config: {
