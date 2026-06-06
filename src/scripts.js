@@ -16,9 +16,9 @@ export function syncProfile(clerkUser) {
   localStorage.setItem("loom_host_local_user", JSON.stringify({
     id: clerkUser.id,
     uid: clerkUser.id,
-    name: clerkUser.fullName || clerkUser.username || "صاحب منصة عُفر",
-    displayName: clerkUser.fullName || clerkUser.username || "صاحب منصة عُفر",
-    email: clerkUser.primaryEmailAddress?.emailAddress || "omvq125omas@gmail.com",
+    name: clerkUser.fullName || clerkUser.username || "عضو سحابي",
+    displayName: clerkUser.fullName || clerkUser.username || "عضو سحابي",
+    email: clerkUser.primaryEmailAddress?.emailAddress || "user@loomhost.ai",
     photoURL: clerkUser.imageUrl || "https://lh3.googleusercontent.com/a/default-user=s96-c",
     isPremium: !!clerkUser.publicMetadata?.isPremium,
     subscriptionPlan: clerkUser.publicMetadata?.subscriptionPlan || "الخطة الذهبية الفورية - Premium",
