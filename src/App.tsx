@@ -90,6 +90,19 @@ export default function App() {
     setToasts((prev) => prev.filter((t) => t.id !== id));
   };
 
+  useEffect(() => {
+    const handleLoomHostToast = (e: Event) => {
+      const customEvent = e as CustomEvent<{ message: string; type?: "success" | "error" | "info" }>;
+      if (customEvent.detail && customEvent.detail.message) {
+        triggerToast(customEvent.detail.message, customEvent.detail.type || "success");
+      }
+    };
+    window.addEventListener("loomhost-toast", handleLoomHostToast as any);
+    return () => {
+      window.removeEventListener("loomhost-toast", handleLoomHostToast as any);
+    };
+  }, []);
+
   const [isAutomationDeckOpen, setIsAutomationDeckOpen] = useState<boolean>(true);
 
   // Synchronously initialize state with zero startup delay
@@ -1594,6 +1607,83 @@ ${jsCode}
       setIsCreatingZip(false);
     }
   };
+
+  if (!isLoaded) {
+    return (
+      <div className="min-h-screen bg-[#050506] text-gray-100 flex flex-col font-sans relative overflow-hidden selection:bg-amber-400 selection:text-black">
+        {/* Premium Toast Notification Overlay */}
+        <ToastNotification toasts={toasts} onClose={handleRemoveToast} />
+        
+        {/* Atmospheric Background Glows */}
+        <div className="absolute top-[-10%] left-[-10%] w-[500px] h-[500px] bg-blue-600/5 rounded-full blur-[130px] pointer-events-none"></div>
+        <div className="absolute bottom-[-10%] right-[-10%] w-[500px] h-[500px] bg-emerald-500/5 rounded-full blur-[130px] pointer-events-none"></div>
+        <div className="absolute top-[40%] left-[50%] w-[400px] h-[400px] bg-amber-500/5 rounded-full blur-[120px] pointer-events-none"></div>
+        
+        {/* Subtle Grid Overlay */}
+        <div className="absolute inset-0 opacity-[0.03] pointer-events-none" style={{ backgroundImage: "radial-gradient(#ffffff 1px, transparent 1px)", backgroundSize: "40px 40px" }}></div>
+
+        {/* Header Skeleton Screen */}
+        <header className="border-b border-white/5 bg-[#08080a]/90 backdrop-blur-xl relative">
+          <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 h-14 flex items-center justify-between">
+            <div className="flex items-center gap-3">
+              <div className="w-9 h-9 bg-slate-800 rounded-lg animate-pulse" />
+              <div className="flex flex-col gap-1">
+                <div className="h-4 w-28 bg-slate-800 rounded animate-pulse" />
+                <div className="h-2 w-16 bg-slate-800 rounded animate-pulse" />
+              </div>
+            </div>
+            <div className="flex gap-4">
+              <div className="h-8 w-24 bg-slate-800 rounded-lg animate-pulse" />
+            </div>
+          </div>
+        </header>
+
+        {/* Content Workspace Skeleton Screen */}
+        <main className="flex-1 max-w-7xl w-full mx-auto p-4 sm:p-6 lg:p-8 flex flex-col lg:flex-row gap-6">
+          {/* Sidebar Left Section Skeleton */}
+          <div className="w-full lg:w-80 space-y-4 shrink-0">
+            <div className="bg-[#0b0c10]/60 border border-white/5 rounded-2xl p-4 space-y-4 animate-pulse">
+              <div className="h-4 w-1/2 bg-slate-800 rounded" />
+              <div className="h-10 bg-slate-800 rounded-xl" />
+              <div className="space-y-2">
+                <div className="h-3 w-full bg-slate-800 rounded" />
+                <div className="h-3 w-5/6 bg-slate-800 rounded" />
+              </div>
+            </div>
+
+            <div className="bg-[#0b0c10]/60 border border-white/5 rounded-2xl p-4 space-y-4 animate-pulse">
+              <div className="h-4 w-1/3 bg-slate-800 rounded" />
+              <div className="h-20 bg-slate-800 rounded-xl" />
+              <div className="h-12 bg-slate-800 rounded-xl" />
+            </div>
+          </div>
+
+          {/* Right Main Panel Skeleton */}
+          <div className="flex-1 space-y-6">
+            <div className="bg-[#0b0c10]/40 border border-white/5 rounded-xl p-2 flex gap-2 animate-pulse">
+              <div className="h-8 w-24 bg-slate-800 rounded-lg" />
+              <div className="h-8 w-24 bg-slate-800 rounded-lg" />
+              <div className="h-8 w-24 bg-slate-800 rounded-lg" />
+            </div>
+
+            <div className="bg-[#0b0c10]/60 border border-white/5 rounded-2xl p-6 space-y-6 animate-pulse">
+              <div className="h-6 w-1/4 bg-slate-800 rounded" />
+              <div className="space-y-3">
+                <div className="h-4 w-full bg-slate-800 rounded" />
+                <div className="h-4 w-11/12 bg-slate-800 rounded" />
+                <div className="h-4 w-5/6 bg-slate-800 rounded" />
+              </div>
+
+              <div className="flex gap-4 pt-4 border-t border-white/5">
+                <div className="h-10 w-32 bg-slate-800 rounded-xl" />
+                <div className="h-10 w-32 bg-slate-800 rounded-xl" />
+              </div>
+            </div>
+          </div>
+        </main>
+      </div>
+    );
+  }
 
   return (
     <div className="min-h-screen bg-[#050506] text-gray-100 flex flex-col font-sans relative overflow-hidden selection:bg-amber-400 selection:text-black">
